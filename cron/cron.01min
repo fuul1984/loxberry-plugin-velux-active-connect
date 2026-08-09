@@ -1,0 +1,10 @@
+#!/bin/bash
+# VELUX Active Connect Scheduler
+# UDP-Steuerungslistener starten/überwachen.
+/opt/loxberry/bin/plugins/veluxactive/control_watchdog.sh >/dev/null 2>&1
+
+/usr/bin/python3 \
+  /opt/loxberry/bin/plugins/veluxactive/velux_scheduler.py \
+  >/dev/null 2>&1
+
+exit 0

@@ -1,4 +1,4 @@
-# VELUX Active Connect for LoxBerry
+# VELUX Active Connect
 
 VELUX Active Connect verbindet **VELUX ACTIVE / VELUX App Control** mit LoxBerry und Loxone. Das Plugin liest Geräte- und Raumwerte über die VELUX-Cloud, sendet ausgewählte Werte per UDP an Loxone und kann Fenster/Rollläden über Web und Loxone steuern. Für signierte Dachfenster-Positionen unterstützt das Plugin die einmalige lokale Gateway-Kopplung.
 
@@ -70,3 +70,23 @@ Repository: https://github.com/fuul1984/loxberry-plugin-velux-active-connect
 ## Lizenz / Danksagung
 
 Dieses Projekt steht unter der MIT-Lizenz. Die VELUX-Protokoll- und Signing-Implementierung wurde unter anderem anhand des MIT-lizenzierten Projekts `Niek/ha-velux-active` und des pyatmo-Verhaltens nachvollzogen. Siehe `THIRD_PARTY_NOTICES.md`.
+
+
+## v0.5.6
+
+- Fix für das konfigurierte Abrufintervall
+- Scheduler berechnet den nächsten Lauf ab dem Start des letzten Abrufs
+- Abrufdauer verlängert das Intervall nicht mehr zusätzlich
+- Statusanzeige mit Abrufintervall und nächstem möglichen Lauf
+- zusätzliche Scheduler-Diagnose im Log
+
+## v0.5.9
+
+- Automatischer VELUX-Abruf auf TaHoma-artigen LoxBerry-Scheduler umgestellt
+- Standard `cron/cron.01min` plus separater `velux_scheduler.py`
+- Lock gegen parallele Läufe
+- Intervall basiert auf dem Start des letzten erfolgreichen Abrufs
+- Fehlerhafte Läufe verschieben den Erfolgszeitpunkt nicht
+- 1-Minuten-Intervall bleibt dadurch tatsächlich ein Minutenintervall
+- Status zeigt nächsten geplanten Lauf korrekt; keine Unix-1970-Anzeige mehr
+- UDP-Control-Listener bleibt unabhängig überwacht

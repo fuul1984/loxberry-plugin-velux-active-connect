@@ -26,3 +26,20 @@
 
 ## 0.1.x
 - VELUX Login, Homes/Geräte/Werte und LoxBerry-Miniserver-Anbindung
+
+## 0.5.6
+
+- Abrufintervall/Scheduler korrigiert.
+- Startzeit des letzten Abrufs wird als Referenz für den nächsten Lauf verwendet.
+- Statusseite zeigt Abrufintervall und nächsten geplanten Lauf.
+- Scheduler-Diagnose im Plugin-Log ergänzt.
+
+
+## 0.5.9
+
+- Scheduler für den regelmäßigen VELUX-Abruf grundlegend korrigiert.
+- LoxBerry-Standard `cron/cron.01min` verwendet.
+- Separater Scheduler mit Lock gegen parallele Läufe.
+- Intervall wird vom Start eines erfolgreichen Laufs berechnet.
+- Bei einem Fehler erfolgt beim nächsten Scheduler-Tick ein neuer Versuch.
+- Anzeige des nächsten Laufs korrigiert.

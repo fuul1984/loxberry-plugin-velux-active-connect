@@ -246,11 +246,21 @@ def send_udp(cfg, values, heartbeat):
         return len(payload)
 
 def main(force=False, force_login=False):
+    # Automatic cadence is controlled by velux_scheduler.py. The scheduler calls
+    # this worker with --force, while the web UI can also force an immediate run.
     cfg=load(CONFIG,{})
     last=load(RUN,{})
     interval=max(1,int(cfg.get("poll_interval_minutes",5)))
-    if not force and time.time()-float(last.get("timestamp",0)) < interval*60-5: return 0
-    started=time.time()
+    now=time.time()
+    last_started=float(last.get("started_at", last.get("timestamp",0)) or 0)
+    next_due=last_started + interval*60 if last_started > 0 else 0
+    if not force and last_started > 0 and now < next_due:
+        return 0
+    started=now
+    # Store the START time immediately. This prevents the runtime of the cloud
+    # request from extending the configured polling interval by another cron minute.
+    save(RUN,{"started_at":started,"timestamp":started,"ok":None},0o644)
+    log(f"Scheduler: Intervall={interval} min, Start={time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(started))}, nächster Lauf ab {time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(started+interval*60))}")
     try:
         from velux_api import login, refresh, homesdata, homestatus
         globals().update(login=login, refresh=refresh, homesdata=homesdata, homestatus=homestatus)
@@ -296,7 +306,7 @@ def main(force=False, force_login=False):
         except Exception as udp_e:
             state["udp_error"]=str(udp_e)
             log("UDP-WARNUNG: "+str(udp_e))
-        save(STATE,state,0o644); save(RUN,{"timestamp":time.time(),"ok":True},0o644)
+        save(STATE,state,0o644); save(RUN,{"started_at":started,"timestamp":started,"finished_at":time.time(),"ok":True},0o644)
         log(f"Abruf OK: {len(state['homes'])} Home(s), {len(state['devices'])} Gerät(e), {len(state['values'])} Wert(e), UDP={state['udp_messages']}")
         return 0
     except Exception as e:
@@ -310,7 +320,7 @@ def main(force=False, force_login=False):
         try: save(STATE,state_err,0o644)
         except Exception as state_e:
             sys.stderr.write(f"STATE SCHREIBFEHLER: {state_e}\n{tb}\n")
-        try: save(RUN,{"timestamp":time.time(),"ok":False},0o644)
+        try: save(RUN,{"started_at":started,"timestamp":started,"finished_at":time.time(),"ok":False},0o644)
         except Exception as run_e: sys.stderr.write(f"RUN SCHREIBFEHLER: {run_e}\n")
         sys.stderr.write(err+"\n")
         return 1

@@ -1,14 +1,14 @@
 from __future__ import annotations
 import html, json, os, subprocess, sys, time, urllib.parse
 from pathlib import Path
-PLUGIN="veluxactive"; VERSION="0.5.5"
+PLUGIN="veluxactive"; VERSION="0.5.9"
 LBROOT=Path(os.environ.get("LBHOMEDIR","/opt/loxberry"))
 CFG=Path(os.environ.get("LBPCONFIGDIR", str(LBROOT/f"config/plugins/{PLUGIN}")))
 DATA=Path(os.environ.get("LBPDATADIR", str(LBROOT/f"data/plugins/{PLUGIN}")))
 LOG=Path(os.environ.get("LBPLOGDIR", str(LBROOT/f"log/plugins/{PLUGIN}")))
 BIN=Path(os.environ.get("LBPBINDIR", str(LBROOT/f"bin/plugins/{PLUGIN}")))
 CFG.mkdir(parents=True,exist_ok=True); DATA.mkdir(parents=True,exist_ok=True); LOG.mkdir(parents=True,exist_ok=True)
-config_file=CFG/"config.json"; state_file=DATA/"state.json"; control_state_file=DATA/"control_state.json"; rx_state_file=DATA/"control_rx.json"; log_file=LOG/"veluxactive.log"; token_file=CFG/"tokens.json"; default_file=Path(os.environ.get("LBPTEMPLATEDIR", str(LBROOT/f"templates/plugins/{PLUGIN}")))/"default.json"
+config_file=CFG/"config.json"; state_file=DATA/"state.json"; run_file=DATA/"last_run.json"; scheduler_success_file=DATA/"scheduler_last_success.timestamp"; control_state_file=DATA/"control_state.json"; rx_state_file=DATA/"control_rx.json"; log_file=LOG/"veluxactive.log"; token_file=CFG/"tokens.json"; default_file=Path(os.environ.get("LBPTEMPLATEDIR", str(LBROOT/f"templates/plugins/{PLUGIN}")))/"default.json"
 def load(p,d):
     try:return json.loads(p.read_text(encoding="utf-8"))
     except:return d
@@ -242,6 +242,13 @@ except Exception as e:
     message=f"Aktion fehlgeschlagen: {type(e).__name__}: {e}"; message_cls="badbox"
 
 state=load(state_file,{})
+run_state=load(run_file,{})
+scheduler_last_success=0
+try:
+    _raw=scheduler_success_file.read_text(encoding="utf-8").strip()
+    scheduler_last_success=int(_raw) if _raw.isdigit() else 0
+except Exception:
+    scheduler_last_success=0
 control_state=load(control_state_file,{})
 rx_state=load(rx_state_file,{})
 try: log_lines=log_file.read_text(encoding="utf-8",errors="replace").splitlines()[-80:]
@@ -326,7 +333,7 @@ elif page=="udp":
     print('<p><button class="btn primary" name="action" value="save_udp">UDP Messages speichern</button></p></div></form>')
 elif page=="control":
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
-    print('<div class="card"><h2>Steuerung <span class="badge">v0.5.5</span></h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
+    print('<div class="card"><h2>Steuerung <span class="badge">v0.5.9</span></h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
     pidfile=DATA/"control_listener.pid"
     listener_running=False; listener_pid=""
@@ -380,7 +387,11 @@ else:
     paired=bool(signing.get("sign_key_id") and signing.get("hash_sign_key"))
     print(f'<h2>Gateway Kopplung: <span class="{"ok" if paired else "bad"}">{"Gekoppelt" if paired else "Nicht gekoppelt"}</span></h2>')
     if state:
-        print(f'<div class="grid"><div><b>Letzter Abruf</b><br>{esc(fmt_ts(state.get("timestamp")))}</div><div><b>Homes</b><br>{len(state.get("homes",[]))}</div><div><b>Räume</b><br>{len(state.get("rooms",[]))}</div><div><b>Geräte</b><br>{len(state.get("devices",[]))}</div><div><b>Werte</b><br>{len(state.get("values",{}))}</div><div><b>UDP gesendet</b><br>{esc(state.get("udp_messages",0))}</div></div>')
+        interval=max(1,int(cfg.get("poll_interval_minutes",5)))
+        last_started=float(run_state.get("started_at",run_state.get("timestamp",0)) or 0)
+        next_run=scheduler_last_success+interval*60 if scheduler_last_success else None
+        next_run_text=fmt_ts(next_run) if next_run else "noch nicht geplant"
+        print(f'<div class="grid"><div><b>Letzter Abruf</b><br>{esc(fmt_ts(state.get("timestamp")))}</div><div><b>Abrufintervall</b><br>{interval} min</div><div><b>Nächster Lauf ab</b><br>{esc(next_run_text)}</div><div><b>Homes</b><br>{len(state.get("homes",[]))}</div><div><b>Räume</b><br>{len(state.get("rooms",[]))}</div><div><b>Geräte</b><br>{len(state.get("devices",[]))}</div><div><b>Werte</b><br>{len(state.get("values",{}))}</div><div><b>UDP gesendet</b><br>{esc(state.get("udp_messages",0))}</div></div>')
         if state.get("error"): print(f'<p class="bad"><b>Fehler:</b> {esc(state.get("error"))}</p>')
         if state.get("udp_error"): print(f'<p class="bad"><b>UDP-Warnung:</b> {esc(state.get("udp_error"))}</p>')
     print('<form method="post"><input type="hidden" name="page" value="status"><button class="btn primary" name="action" value="fetch">VELUX Daten jetzt abrufen</button><button class="btn ghost" name="action" value="relogin">Login komplett neu testen</button></form></div>')

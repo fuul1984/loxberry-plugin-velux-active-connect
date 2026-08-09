@@ -13,7 +13,7 @@ CLIENT_SECRET = "6ae2d89d15e767ae5c56b456b452d319"
 APP_VERSION = "791302006"
 USER_PREFIX = "velux"
 SCOPE = "velux_scopes"
-USER_AGENT = "VELUX-Active-Connect-LoxBerry/0.5.5"
+USER_AGENT = "VELUX-Active-Connect-LoxBerry/0.5.9"
 
 class VeluxError(RuntimeError):
     pass
