@@ -1,0 +1,107 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building VELUX Active Connect v$VERSION"
+
+      - name: Verify plugin version
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PLUGIN_VERSION="$(grep '^VERSION=' plugin.cfg | cut -d= -f2)"
+
+          echo "Git tag version: $VERSION"
+          echo "plugin.cfg version: $PLUGIN_VERSION"
+
+          if [ "$VERSION" != "$PLUGIN_VERSION" ]; then
+            echo "ERROR: Tag version and plugin.cfg VERSION do not match."
+            exit 1
+          fi
+
+      - name: Set executable permissions
+        shell: bash
+        run: |
+          chmod +x postinstall.sh || true
+          chmod +x postupgrade.sh || true
+          chmod +x preupgrade.sh || true
+          chmod +x preremove.sh || true
+
+          find bin -type f \( -name "*.py" -o -name "*.sh" -o -name "*.pl" \) \
+            -exec chmod +x {} \;
+
+          chmod +x webfrontend/htmlauth/index.cgi || true
+
+      - name: Check Python syntax
+        shell: bash
+        run: |
+          find bin -type f -name "*.py" -print0 | xargs -0 -n1 python3 -m py_compile
+
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          for file in \
+            postinstall.sh \
+            postupgrade.sh \
+            preupgrade.sh \
+            preremove.sh \
+            bin/control_watchdog.sh \
+            bin/install_dependencies.sh
+          do
+            if [ -f "$file" ]; then
+              bash -n "$file"
+            fi
+          done
+
+      - name: Build LoxBerry plugin ZIP
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PACKAGE="VELUX_Active_Connect_v${VERSION}.zip"
+
+          rm -rf build
+          mkdir -p build/VELUX_Active_Connect_v${VERSION}
+
+          rsync -a \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude="build" \
+            --exclude="*.zip" \
+            --exclude="__pycache__" \
+            --exclude="*.pyc" \
+            --exclude="GITHUB_SETUP.md" \
+            build/VELUX_Active_Connect_v${VERSION}/
+
+          cd build
+          zip -r "../${PACKAGE}" "VELUX_Active_Connect_v${VERSION}"
+
+          cd ..
+          echo "Created ${PACKAGE}"
+          unzip -t "${PACKAGE}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: VELUX Active Connect v${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: VELUX_Active_Connect_v${{ steps.version.outputs.version }}.zip
