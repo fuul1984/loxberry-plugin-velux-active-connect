@@ -1,0 +1,80 @@
+name: Validate Plugin
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Python syntax
+        run: |
+          find bin -type f -name "*.py" -print0 | xargs -0 -n1 python -m py_compile
+
+      - name: Check shell syntax
+        run: |
+          for file in \
+            postinstall.sh \
+            postupgrade.sh \
+            preupgrade.sh \
+            preremove.sh \
+            bin/control_watchdog.sh \
+            bin/install_dependencies.sh
+          do
+            if [ -f "$file" ]; then
+              echo "Checking $file"
+              bash -n "$file"
+            fi
+          done
+
+      - name: Check plugin.cfg
+        run: |
+          grep -q "^NAME=velux_active_connect" plugin.cfg
+          grep -q "^FOLDER=veluxactive" plugin.cfg
+          grep -q "^VERSION=" plugin.cfg
+          grep -q "^RELEASECFG=" plugin.cfg
+
+      - name: Check required files
+        run: |
+          test -f plugin.cfg
+          test -f release.cfg
+          test -f prerelease.cfg
+          test -f postinstall.sh
+          test -f postupgrade.sh
+          test -f preupgrade.sh
+          test -f preremove.sh
+          test -f bin/worker.py
+          test -f bin/webui.py
+          test -f bin/velux_api.py
+          test -f webfrontend/htmlauth/index.cgi
+
+      - name: Check JSON files
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for path in Path(".").rglob("*.json"):
+              print(f"Checking {path}")
+              with path.open(encoding="utf-8") as f:
+                  json.load(f)
+
+          print("JSON validation OK")
+          PY
+
+      - name: Validation completed
+        run: echo "VELUX Active Connect validation successful."
