@@ -1,0 +1,31 @@
+{
+  "email": "",
+  "password": "",
+  "poll_interval_minutes": 5,
+  "udp_enabled": true,
+  "udp_port": 7000,
+  "udp_prefix": "velux",
+  "heartbeat_enabled": true,
+  "send_raw_json": false,
+  "selected_values": {
+    "temperature": true,
+    "humidity": true,
+    "co2": true,
+    "lux": true,
+    "air_quality": true,
+    "battery_percent": true,
+    "reachable": true,
+    "position": true,
+    "rain": true
+  },
+  "miniserver_no": 1,
+  "udp_auto_new": true,
+  "udp_heartbeat_key": "heartbeat",
+  "udp_messages": {},
+  "control": {
+    "enabled": false,
+    "udp_listen_port": 7001,
+    "command_prefix": "velux.cmd"
+  },
+  "udp_send_mode": "always"
+}
