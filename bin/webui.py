@@ -235,7 +235,10 @@ try:
             message="VELUX ACTIVE Automatisierung aktiviert."
             message_cls="okbox"
         else:
-            message="Automatisierung konnte nicht aktiviert werden: "+(control_state.get("result") or r.stderr.strip() or r.stdout.strip() or f"Code {r.returncode}")
+            # Prefer the subprocess error. control_state may still contain an older command
+            # if control_cli failed before it could write a new state.
+            detail=(r.stderr.strip() or r.stdout.strip() or control_state.get("result") or f"Code {r.returncode}")
+            message="Automatisierung konnte nicht aktiviert werden: "+detail
             message_cls="badbox"
         page="control"
     elif action in ("control_open","control_close","control_stop","control_position"):

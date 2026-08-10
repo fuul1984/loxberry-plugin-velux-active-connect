@@ -73,3 +73,8 @@ Scheduler auf das bewährte Somfy-TaHoma-Prinzip umgestellt:
 - Web-Button auf der Steuerungsseite
 - Loxone UDP: `velux.cmd.velux_active.automation=1`
 - benötigt erfolgreiche Gateway-Kopplung
+
+
+### v0.5.12 Hotfix
+- `automation` in `control_cli.py` als gültiger Web-Steuerbefehl freigegeben
+- widersprüchliche Fehlermeldung mit altem `control_state` korrigiert

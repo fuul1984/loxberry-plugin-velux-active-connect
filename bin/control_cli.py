@@ -37,7 +37,7 @@ def log(msg):
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--device",required=True)
-    ap.add_argument("--command",required=True,choices=["open","close","stop","position"])
+    ap.add_argument("--command",required=True,choices=["open","close","stop","position","automation"])
     ap.add_argument("--value",default="1")
     args=ap.parse_args()
 
