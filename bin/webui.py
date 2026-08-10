@@ -1,7 +1,7 @@
 from __future__ import annotations
 import html, json, os, subprocess, sys, time, urllib.parse
 from pathlib import Path
-PLUGIN="veluxactive"; VERSION="0.5.9"
+PLUGIN="veluxactive"; VERSION="0.5.12"
 LBROOT=Path(os.environ.get("LBHOMEDIR","/opt/loxberry"))
 CFG=Path(os.environ.get("LBPCONFIGDIR", str(LBROOT/f"config/plugins/{PLUGIN}")))
 DATA=Path(os.environ.get("LBPDATADIR", str(LBROOT/f"data/plugins/{PLUGIN}")))
@@ -190,6 +190,15 @@ try:
         except Exception:
             pass
         message="Steuerungseinstellungen gespeichert."; message_cls="okbox"; page="control"
+    elif action=="toggle_plugin":
+        cfg["plugin_enabled"]=not bool(cfg.get("plugin_enabled",True))
+        save_cfg(cfg)
+        try:
+            subprocess.run([str(BIN/"control_watchdog.sh")],capture_output=True,text=True,timeout=10)
+        except Exception:
+            pass
+        message=("Plugin aktiviert." if cfg["plugin_enabled"] else "Plugin deaktiviert.")
+        message_cls="okbox"; page="status"
     elif action=="udp_selftest":
         try:
             sent=udp_selftest()
@@ -219,6 +228,16 @@ try:
                 except: err=None
                 message="Gateway-Kopplung fehlgeschlagen: "+(err or r.stderr.strip() or r.stdout.strip() or f"Code {r.returncode}"); message_cls="badbox"
             page="settings"
+    elif action=="control_automation":
+        r=run_control("velux_active","automation","1")
+        control_state=load(control_state_file,{})
+        if r.returncode==0:
+            message="VELUX ACTIVE Automatisierung aktiviert."
+            message_cls="okbox"
+        else:
+            message="Automatisierung konnte nicht aktiviert werden: "+(control_state.get("result") or r.stderr.strip() or r.stdout.strip() or f"Code {r.returncode}")
+            message_cls="badbox"
+        page="control"
     elif action in ("control_open","control_close","control_stop","control_position"):
         device=form.get("control_device","").strip()
         cmd={"control_open":"open","control_close":"close","control_stop":"stop","control_position":"position"}[action]
@@ -333,7 +352,16 @@ elif page=="udp":
     print('<p><button class="btn primary" name="action" value="save_udp">UDP Messages speichern</button></p></div></form>')
 elif page=="control":
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
-    print('<div class="card"><h2>Steuerung <span class="badge">v0.5.9</span></h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
+    print('<div class="card"><h2>Steuerung <span class="badge">v0.5.12</span></h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
+    paired=bool((cfg.get("signing") or {}).get("sign_key_id") and (cfg.get("signing") or {}).get("hash_sign_key"))
+    print('<div class="card"><h2>VELUX ACTIVE Automatisierung</h2>')
+    print('<p>Gibt die VELUX ACTIVE Klima-Automatik mit dem signierten Gateway-Scenario <code>home</code> wieder frei.</p>')
+    if paired:
+        print('<form method="post"><input type="hidden" name="page" value="control"><button class="btn primary" name="action" value="control_automation">Automatisierung aktivieren</button></form>')
+        print('<p><b>Loxone UDP:</b> <code>velux.cmd.velux_active.automation=1</code></p>')
+    else:
+        print('<p><b>Gateway nicht gekoppelt.</b> Dieser Befehl benötigt die Gateway-Kopplung.</p>')
+    print('</div>')
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
     pidfile=DATA/"control_listener.pid"
     listener_running=False; listener_pid=""
@@ -386,6 +414,11 @@ else:
     signing=cfg.get("signing",{}) if isinstance(cfg.get("signing",{}),dict) else {}
     paired=bool(signing.get("sign_key_id") and signing.get("hash_sign_key"))
     print(f'<h2>Gateway Kopplung: <span class="{"ok" if paired else "bad"}">{"Gekoppelt" if paired else "Nicht gekoppelt"}</span></h2>')
+    plugin_enabled=bool(cfg.get("plugin_enabled",True))
+    plugin_state="🟢 Aktiv" if plugin_enabled else "⚪ Inaktiv"
+    plugin_btn="Plugin deaktivieren" if plugin_enabled else "Plugin aktivieren"
+    plugin_btn_class="secondary" if plugin_enabled else "primary"
+    print(f'<div style="margin:10px 0 18px"><b>Plugin:</b> {plugin_state} <form method="post" style="display:inline;margin-left:10px"><input type="hidden" name="page" value="status"><button class="btn {plugin_btn_class}" name="action" value="toggle_plugin">{plugin_btn}</button></form></div>')
     if state:
         interval=max(1,int(cfg.get("poll_interval_minutes",5)))
         last_started=float(run_state.get("started_at",run_state.get("timestamp",0)) or 0)

@@ -1,92 +1,75 @@
-# VELUX Active Connect
+# VELUX Active Connect v0.5.5
 
-VELUX Active Connect verbindet **VELUX ACTIVE / VELUX App Control** mit LoxBerry und Loxone. Das Plugin liest Geräte- und Raumwerte über die VELUX-Cloud, sendet ausgewählte Werte per UDP an Loxone und kann Fenster/Rollläden über Web und Loxone steuern. Für signierte Dachfenster-Positionen unterstützt das Plugin die einmalige lokale Gateway-Kopplung.
+Basis ist unverändert v0.5.4.
 
-## Funktionen
+Einzige funktionale Änderung:
+- Auf der Statusseite wird die Gateway-Kopplung kompakt im gleichen Stil wie der Verbindungsstatus angezeigt:
+  - Status: Verbunden
+  - Gateway Kopplung: Gekoppelt
 
-- VELUX Cloud Login mit Token-Refresh
-- Homes, Räume und Geräte automatisch erkennen
-- Temperatur, Feuchte, CO₂, Helligkeit, Luftqualität und weitere gemeldete Werte
-- Regensignal des Gateways, sofern von VELUX gemeldet
-- UDP-Ausgabe an einen in LoxBerry konfigurierten Miniserver
-- Alle Werte senden oder nur geänderte Werte senden
-- Heartbeat an Loxone
-- Jede UDP-Message einzeln aktivierbar und umbenennbar
-- Steuerung per Web und Loxone UDP: AUF, STOP, ZU, Position 0–100 %
-- Gateway-Kopplung für signierte Dachfensterpositionen
-- Konfiguration, Token und Kopplung bleiben bei Updates erhalten
-- LoxBerry AutoUpdate vorbereitet und aktiviert
-
-## Installation
-
-Die aktuelle Release-ZIP aus **Releases** herunterladen und in LoxBerry unter **Plugin-Verwaltung → Plugin installieren** hochladen.
-
-Nach der Installation unter **Einstellungen** VELUX E-Mail/Passwort, Miniserver, UDP-Sendeport und optional die Loxone-Steuerung konfigurieren.
-
-## Loxone Steuerung
-
-Beispiel für einen virtuellen UDP-Ausgang:
-
-```text
-/dev/udp/<LOXBERRY-IP>/7001
-```
-
-`Verbindung nach Senden schließen` aktivieren.
-
-```text
-velux.cmd.dachfenster_bad.open=1
-velux.cmd.dachfenster_bad.stop=1
-velux.cmd.dachfenster_bad.close=1
-velux.cmd.dachfenster_bad.position=<v>
-```
-
-Die konkreten Befehle werden im Plugin bei jedem Aktor unter **Steuerung → Loxone Beispiel anzeigen** dargestellt. IP, Port, Präfix und Geräte-Key kommen aus der aktuellen Konfiguration.
-
-## Gateway-Kopplung
-
-Freie Positionen von Dachfenstern können signierte Befehle benötigen. Unter **Einstellungen → VELUX Gateway Kopplung** kann das Gateway einmalig gekoppelt werden. Der LoxBerry muss das Gateway im lokalen Netz über TCP-Port `25050` erreichen. Die Signierschlüssel werden lokal in der Plugin-Konfiguration gespeichert und bei Updates erhalten.
-
-## Logging
-
-Unter **Log** werden Cloud-Abrufe, gelesene Werte, UDP-Status, empfangene Loxone-Befehle, Steuerungsresultate und Kopplungsfehler angezeigt. Zugangsdaten oder Tokens werden nicht im Klartext protokolliert.
-
-## AutoUpdate
-
-Stable: `https://raw.githubusercontent.com/fuul1984/loxberry-plugin-velux-active-connect/main/release.cfg`  
-Prerelease: `https://raw.githubusercontent.com/fuul1984/loxberry-plugin-velux-active-connect/main/prerelease.cfg`
-
-## Entwicklung
-
-Repository: https://github.com/fuul1984/loxberry-plugin-velux-active-connect
-
-### Release erstellen
-
-1. Version in `plugin.cfg`, `release.cfg` und `prerelease.cfg` anpassen.
-2. Changelog aktualisieren.
-3. Commit und Tag erstellen, z. B. `v0.5.5`.
-4. Tag pushen.
-5. GitHub Actions prüft das Plugin, baut die LoxBerry-ZIP und legt das GitHub Release an.
-
-## Lizenz / Danksagung
-
-Dieses Projekt steht unter der MIT-Lizenz. Die VELUX-Protokoll- und Signing-Implementierung wurde unter anderem anhand des MIT-lizenzierten Projekts `Niek/ha-velux-active` und des pyatmo-Verhaltens nachvollzogen. Siehe `THIRD_PARTY_NOTICES.md`.
+Alle Einstellungen, UDP Messages, Gateway-Kopplung, Steuerung und Diagnose bleiben wie in v0.5.4.
 
 
 ## v0.5.6
 
-- Fix für das konfigurierte Abrufintervall
-- Scheduler berechnet den nächsten Lauf ab dem Start des letzten Abrufs
-- Abrufdauer verlängert das Intervall nicht mehr zusätzlich
-- Statusanzeige mit Abrufintervall und nächstem möglichen Lauf
-- zusätzliche Scheduler-Diagnose im Log
+- Scheduler-Intervall korrigiert
+- Intervall wird ab Start des letzten Abrufs berechnet, nicht ab dessen Ende
+- verhindert zusätzliche Verzögerung durch Abrufdauer + 1-Minuten-Cron
+- Status zeigt Abrufintervall und nächsten geplanten Lauf
+- Scheduler schreibt Start und nächsten Lauf ins Log
+
+
+## v0.5.7
+
+- Scheduler-Aufruf über eigenen `bin/cronjob.sh`
+- LoxBerry `cron.01min` verwendet einen Symlink auf diesen Entry Point
+- Cron-Umgebung erhält explizit Config-, Data- und Log-Pfade
+- `scheduler_tick.json` wird jede Minute aktualisiert
+- Status zeigt „Scheduler letzter Tick“
+- damit klar erkennbar: Cron läuft / Cron läuft nicht / Intervall noch nicht fällig
+
+
+## v0.5.8
+
+Scheduler auf das bewährte Somfy-TaHoma-Prinzip umgestellt:
+
+- standardmässige LoxBerry-Datei `cron/cron.01min`
+- separater `velux_scheduler.py`
+- non-blocking Lock gegen parallele Scheduler-Läufe
+- Intervallprüfung ausserhalb des eigentlichen VELUX-Workers
+- erfolgreicher Zeitstempel wird erst nach vollständig erfolgreichem Worker-Lauf gesetzt
+- bei Fehler wird kein Erfolgszeitstempel geschrieben; der nächste Minuten-Cron versucht erneut
+- UDP-Control-Listener wird bei jedem Cron-Tick weiterhin überwacht
+
 
 ## v0.5.9
 
-- Automatischer VELUX-Abruf auf TaHoma-artigen LoxBerry-Scheduler umgestellt
-- Standard `cron/cron.01min` plus separater `velux_scheduler.py`
-- Lock gegen parallele Läufe
-- Intervall basiert auf dem Start des letzten erfolgreichen Abrufs
-- Fehlerhafte Läufe verschieben den Erfolgszeitpunkt nicht
-- 1-Minuten-Intervall bleibt dadurch tatsächlich ein Minutenintervall
-- Status zeigt nächsten geplanten Lauf korrekt; keine Unix-1970-Anzeige mehr
-- UDP-Control-Listener bleibt unabhängig überwacht
+- Scheduler-Zeitbasis korrigiert
+- Erfolgszeitpunkt wird erst nach erfolgreichem Worker-Lauf gespeichert
+- gespeichert wird jedoch der START des erfolgreichen Laufs
+- dadurch bleibt ein 1-Minuten-Intervall tatsächlich 1 Minute und wird nicht durch die API-Laufzeit auf 2 Minuten verlängert
+- nächster geplanter Lauf wird im Log mit konkretem Zeitpunkt ausgegeben
+
+
+## v0.5.10
+
+- Statusseite: Schalter **Plugin aktiv / inaktiv**
+- Inaktiv deaktiviert automatische Abrufe und den UDP-Steuerungslistener
+- Einstellungen, Daten und Gateway-Kopplung bleiben erhalten
+- Erweiterte Diagnose für `open` und `position`
+- Diagnose protokolliert Home-ID, Device-ID, Bridge-ID, Gateway-ID und Kopplungsstatus
+- normaler und signierter setstate-Pfad werden getrennt protokolliert
+- keine Tokens, Passwörter oder privaten Schlüssel werden geloggt
+- Hauptlog wird bei einer Neuinstallation geleert
+- bei einem Update bleibt das bestehende Log erhalten
+- Scheduler-Fix aus v0.5.9 bleibt unverändert
+- kein 5-Sekunden-Warte-Workaround
+
+
+## v0.5.12
+
+- VELUX ACTIVE Automatisierung wieder aktivieren
+- signierter Gateway-Befehl `scenario=home`
+- Web-Button auf der Steuerungsseite
+- Loxone UDP: `velux.cmd.velux_active.automation=1`
+- benötigt erfolgreiche Gateway-Kopplung

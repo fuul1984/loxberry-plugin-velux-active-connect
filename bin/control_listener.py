@@ -46,11 +46,38 @@ def parse_message(text,prefix):
     return device.strip(),command.lower().strip(),value
 
 def execute(cfg,device_key,command,value):
+    if not bool(cfg.get("plugin_enabled", True)):
+        raise RuntimeError("Plugin ist inaktiv")
     state=load(STATE,{})
+    if command in ("automation","resume_automation","home"):
+        homes=state.get("homes",[]) if isinstance(state.get("homes"),list) else []
+        devices=state.get("devices",[]) if isinstance(state.get("devices"),list) else []
+        gateways=[d for d in devices if d.get("type")=="NXG" or d.get("role")=="Gateway"]
+        signing=cfg.get("signing",{}) if isinstance(cfg.get("signing"),dict) else {}
+        gateway_id=signing.get("gateway_id","") or (gateways[0].get("id","") if gateways else "")
+        home_id=(gateways[0].get("home_id","") if gateways else "") or (homes[0].get("id","") if homes else "")
+        if not gateway_id or not home_id:
+            raise RuntimeError("Gateway/Home für Automatisierung nicht gefunden")
+        if not signing.get("sign_key_id") or not signing.get("hash_sign_key"):
+            raise RuntimeError("Gateway ist nicht vollständig gekoppelt")
+        t=ensure_token(cfg)
+        log(f"CONTROL AUTO: Automatisierung aktivieren, home_id={home_id}, gateway_id={gateway_id}")
+        signed_home_scenario(t["access_token"],home_id,gateway_id,signing["sign_key_id"],signing["hash_sign_key"])
+        pseudo={"name":"VELUX ACTIVE","key":"velux_active","id":gateway_id,"home_id":home_id,"role":"Gateway"}
+        return "Automatisierung aktiviert (scenario=home, signiert)",pseudo
     devices=[d for d in state.get("devices",[]) if str(d.get("udp_key"))==device_key]
     if len(devices)!=1: raise RuntimeError(f"Gerät '{device_key}' nicht eindeutig gefunden")
     d=devices[0]
     if d.get("role")!="Aktor": raise RuntimeError(f"Gerät '{device_key}' ist kein Aktor")
+    if command in ("open","position"):
+        signing=cfg.get("signing",{}) if isinstance(cfg.get("signing"),dict) else {}
+        paired=bool(signing.get("sign_key_id") and signing.get("hash_sign_key"))
+        log(
+            "CONTROL DIAG: "
+            f"cmd={command}, home_id={d.get('home_id','')}, "
+            f"device_id={d.get('id','')}, bridge_id={d.get('bridge','')}, "
+            f"gateway_id={signing.get('gateway_id','')}, gekoppelt={'ja' if paired else 'nein'}"
+        )
     if command in ("open","close","stop") and str(value).lower() in ("0","false","off",""):
         return "ignoriert (Trigger=0)",d
     if command=="open": pos=100
@@ -65,9 +92,15 @@ def execute(cfg,device_key,command,value):
         response=stop_cover(t["access_token"],d.get("home_id",""),d.get("id",""),d.get("bridge",""))
     else:
         try:
+            if command in ("open","position"):
+                log("CONTROL DIAG: normaler setstate wird versucht")
             response=set_cover_position(t["access_token"],d.get("home_id",""),d.get("id",""),d.get("bridge",""),pos)
             result="akzeptiert"
+            if command in ("open","position"):
+                log("CONTROL DIAG: normaler setstate akzeptiert")
         except VeluxError as e:
+            if command in ("open","position"):
+                log(f"CONTROL DIAG: normaler setstate Fehler: {e}")
             signing=cfg.get("signing",{}) if isinstance(cfg.get("signing"),dict) else {}
             needs_signed=("code': 9" in str(e) or '"code":9' in str(e) or '"code": 9' in str(e))
             if not needs_signed or not signing.get("sign_key_id") or not signing.get("hash_sign_key"):
@@ -75,16 +108,24 @@ def execute(cfg,device_key,command,value):
             bridge=d.get("bridge") or signing.get("gateway_id","")
             if signing.get("gateway_id") and bridge and bridge!=signing.get("gateway_id"):
                 raise RuntimeError("Signierschlüssel gehört zu einem anderen Gateway")
+            if command in ("open","position"):
+                log(
+                    "CONTROL DIAG: signierter setstate wird versucht, "
+                    f"bridge_id={bridge}, key_id_vorhanden={'ja' if bool(signing.get('sign_key_id')) else 'nein'}, "
+                    f"hash_key_vorhanden={'ja' if bool(signing.get('hash_sign_key')) else 'nein'}"
+                )
             response=signed_position(t["access_token"],d.get("home_id",""),d.get("id",""),bridge,pos,
                                      signing["sign_key_id"],signing["hash_sign_key"])
             result="akzeptiert (signiert)"
+            if command in ("open","position"):
+                log("CONTROL DIAG: signierter setstate akzeptiert")
         return result,d
     return ("akzeptiert" if response.get("status") in (None,"ok") else str(response.get("status"))),d
 
 def main():
     cfg=load(CONFIG,{})
     c=cfg.get("control",{}) if isinstance(cfg.get("control"),dict) else {}
-    if not c.get("enabled"): return 0
+    if not bool(cfg.get("plugin_enabled", True)) or not c.get("enabled"): return 0
     port=int(c.get("udp_listen_port",7001)); prefix=str(c.get("command_prefix","velux.cmd") or "velux.cmd")
     DATA.mkdir(parents=True,exist_ok=True); PIDFILE.write_text(str(os.getpid()))
     sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
@@ -94,7 +135,7 @@ def main():
         while True:
             cfg=load(CONFIG,{})
             c=cfg.get("control",{}) if isinstance(cfg.get("control"),dict) else {}
-            if not c.get("enabled") or int(c.get("udp_listen_port",port))!=port: break
+            if not bool(cfg.get("plugin_enabled", True)) or not c.get("enabled") or int(c.get("udp_listen_port",port))!=port: break
             try:data,addr=sock.recvfrom(4096)
             except socket.timeout:continue
             text=data.decode("utf-8","replace").strip()

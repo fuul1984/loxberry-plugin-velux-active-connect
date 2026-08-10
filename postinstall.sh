@@ -49,4 +49,11 @@ chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/velux_scheduler.py" 2>/dev/null || 
 # Dependency for signed VELUX gateway control
 "$LBROOT/bin/plugins/$PLUGIN_FOLDER/install_dependencies.sh" "$@" || true
 chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_cli.py" 2>/dev/null || true
+
+# Frische Neuinstallation: Hauptlog leeren.
+# Bei Updates wird postupgrade.sh verwendet, deshalb bleibt das Log dort erhalten.
+: > "$LOG/veluxactive.log"
+chown loxberry:loxberry "$LOG/veluxactive.log" 2>/dev/null || true
+chmod 644 "$LOG/veluxactive.log" 2>/dev/null || true
+
 exit 0

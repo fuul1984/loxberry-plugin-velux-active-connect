@@ -249,6 +249,9 @@ def main(force=False, force_login=False):
     # Automatic cadence is controlled by velux_scheduler.py. The scheduler calls
     # this worker with --force, while the web UI can also force an immediate run.
     cfg=load(CONFIG,{})
+    if not bool(cfg.get("plugin_enabled", True)):
+        log("Plugin ist inaktiv - Abruf übersprungen")
+        return 0
     last=load(RUN,{})
     interval=max(1,int(cfg.get("poll_interval_minutes",5)))
     now=time.time()

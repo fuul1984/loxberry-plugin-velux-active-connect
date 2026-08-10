@@ -9,7 +9,7 @@ mkdir -p "$DATA" "$LOG"
 enabled=$(python3 - "$CFG" <<'PY'
 import json,sys
 try:
- d=json.load(open(sys.argv[1])); print("1" if (d.get("control") or {}).get("enabled") else "0")
+ d=json.load(open(sys.argv[1])); print("1" if d.get("plugin_enabled",True) and (d.get("control") or {}).get("enabled") else "0")
 except Exception: print("0")
 PY
 )

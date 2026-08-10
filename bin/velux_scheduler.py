@@ -35,6 +35,9 @@ except Exception as e:
     log(f"Scheduler FEHLER: Konfiguration konnte nicht gelesen werden: {e}")
     raise SystemExit(1)
 
+if not bool(cfg.get("plugin_enabled", True)):
+    raise SystemExit(0)
+
 try:
     interval=int(cfg.get("poll_interval_minutes",5))
 except Exception:

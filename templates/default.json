@@ -27,5 +27,6 @@
     "udp_listen_port": 7001,
     "command_prefix": "velux.cmd"
   },
-  "udp_send_mode": "always"
+  "udp_send_mode": "always",
+  "plugin_enabled": true
 }

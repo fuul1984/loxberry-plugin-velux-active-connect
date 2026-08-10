@@ -13,7 +13,7 @@ CLIENT_SECRET = "6ae2d89d15e767ae5c56b456b452d319"
 APP_VERSION = "791302006"
 USER_PREFIX = "velux"
 SCOPE = "velux_scopes"
-USER_AGENT = "VELUX-Active-Connect-LoxBerry/0.5.9"
+USER_AGENT = "VELUX-Active-Connect-LoxBerry/0.5.12"
 
 class VeluxError(RuntimeError):
     pass
@@ -167,4 +167,19 @@ def signed_position(token: str, home_id: str, module_id: str, bridge_id: str, po
     body=data.get("body") if isinstance(data,dict) else None
     errors=body.get("errors") if isinstance(body,dict) else None
     if errors: raise VeluxError(f"signiertes setstate API-Fehler: {errors}")
+    return data
+
+
+def signed_home_scenario(token: str, home_id: str, gateway_id: str,
+                         sign_key_id: str, hash_sign_key: str,
+                         timezone: str="Europe/Zurich") -> dict[str, Any]:
+    from signing import build_signed_scenario
+    mod=build_signed_scenario(gateway_id,"home",sign_key_id,hash_sign_key)
+    payload={"app_type":"app_velux","app_version":APP_VERSION,
+             "home":{"id":home_id,"timezone":timezone,"modules":[mod]}}
+    data=post_json(SYNC_SETSTATE_URL,payload,timeout=25,token=token)
+    body=data.get("body") if isinstance(data,dict) else None
+    errors=body.get("errors") if isinstance(body,dict) else None
+    if errors:
+        raise VeluxError(f"Automatisierung aktivieren API-Fehler: {errors}")
     return data
