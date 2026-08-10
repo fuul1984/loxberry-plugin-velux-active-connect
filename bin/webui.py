@@ -356,14 +356,14 @@ elif page=="udp":
 elif page=="control":
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
     print('<div class="card"><h2>Steuerung <span class="badge">v0.5.12</span></h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
-    paired=bool((cfg.get("signing") or {}).get("sign_key_id") and (cfg.get("signing") or {}).get("hash_sign_key"))
+    paired=True
     print('<div class="card"><h2>VELUX ACTIVE Automatisierung</h2>')
-    print('<p>Gibt die VELUX ACTIVE Klima-Automatik mit dem signierten Gateway-Scenario <code>home</code> wieder frei.</p>')
+    print('<p>Setzt den VELUX Fenstermodus wieder auf <code>algo_available</code> und gibt damit die automatische Lüftung wieder frei.</p>')
     if paired:
         print('<form method="post"><input type="hidden" name="page" value="control"><button class="btn primary" name="action" value="control_automation">Automatisierung aktivieren</button></form>')
         print('<p><b>Loxone UDP:</b> <code>velux.cmd.velux_active.automation=1</code></p>')
     else:
-        print('<p><b>Gateway nicht gekoppelt.</b> Dieser Befehl benötigt die Gateway-Kopplung.</p>')
+        print('<p><b>Hinweis:</b> Dieser Automatik-Befehl benötigt keine Signatur.</p>')
     print('</div>')
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
     pidfile=DATA/"control_listener.pid"

@@ -183,3 +183,17 @@ def signed_home_scenario(token: str, home_id: str, gateway_id: str,
     if errors:
         raise VeluxError(f"Automatisierung aktivieren API-Fehler: {errors}")
     return data
+
+
+def set_window_mode(token: str, home_id: str, module_id: str, bridge_id: str,
+                    mode: str, timezone: str="Europe/Zurich") -> dict[str, Any]:
+    """Set VELUX window algorithm mode. Official app uses algo_available/manual."""
+    payload={"app_type":"app_velux","app_version":APP_VERSION,
+             "home":{"id":home_id,"timezone":timezone,
+                     "modules":[{"id":module_id,"bridge":bridge_id,"mode":str(mode)}]}}
+    data=post_json(SYNC_SETSTATE_URL,payload,timeout=25,token=token)
+    body=data.get("body") if isinstance(data,dict) else None
+    errors=body.get("errors") if isinstance(body,dict) else None
+    if errors:
+        raise VeluxError(f"Fenster-Automatik API-Fehler: {errors}")
+    return data

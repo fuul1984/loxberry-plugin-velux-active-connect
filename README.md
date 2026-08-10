@@ -78,3 +78,37 @@ Scheduler auf das bewährte Somfy-TaHoma-Prinzip umgestellt:
 ### v0.5.12 Hotfix
 - `automation` in `control_cli.py` als gültiger Web-Steuerbefehl freigegeben
 - widersprüchliche Fehlermeldung mit altem `control_state` korrigiert
+
+
+## v0.5.12
+
+- Korrektur VELUX ACTIVE Automatisierung
+- `scenario=home` entfernt: dieser Befehl betrifft Departure/Away Mode, nicht die Fensterautomatik
+- Automatik aktivieren setzt Fenster nun unsigned auf `mode=algo_available`
+- `manual` = Automatik aus
+- `algo_available` / `algo_active` = Automatik aktiv
+- Loxone UDP bleibt: `velux.cmd.velux_active.automation=1`
+
+
+## v0.5.12 – korrigierter Stand
+
+Die VELUX ACTIVE Automatisierung wird über den Fenstermodus wieder aktiviert:
+
+```text
+mode=algo_available
+```
+
+Loxone UDP:
+
+```text
+velux.cmd.velux_active.automation=1
+```
+
+`scenario=home` wird dafür nicht mehr verwendet.
+
+
+### v0.5.12 UDP-Listener-Korrektur
+
+- UDP-Listener wird bei Updates jetzt explizit neu gestartet.
+- Alte PID-Dateien werden nicht übernommen.
+- Damit verwendet UDP nach einem Plugin-Update garantiert den neuen `control_listener.py`.

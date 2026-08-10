@@ -3,7 +3,7 @@ from __future__ import annotations
 import json, os, socket, sys, time, traceback
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from velux_api import login, refresh, set_cover_position, stop_cover, signed_position, VeluxError
+from velux_api import login,refresh,set_cover_position,stop_cover,signed_position,VeluxError,signed_home_scenario,set_window_mode
 
 PLUGIN="veluxactive"
 CFG=Path(os.environ.get("LBPCONFIGDIR") or f"/opt/loxberry/config/plugins/{PLUGIN}")
@@ -50,21 +50,30 @@ def execute(cfg,device_key,command,value):
         raise RuntimeError("Plugin ist inaktiv")
     state=load(STATE,{})
     if command in ("automation","resume_automation","home"):
-        homes=state.get("homes",[]) if isinstance(state.get("homes"),list) else []
         devices=state.get("devices",[]) if isinstance(state.get("devices"),list) else []
-        gateways=[d for d in devices if d.get("type")=="NXG" or d.get("role")=="Gateway"]
-        signing=cfg.get("signing",{}) if isinstance(cfg.get("signing"),dict) else {}
-        gateway_id=signing.get("gateway_id","") or (gateways[0].get("id","") if gateways else "")
-        home_id=(gateways[0].get("home_id","") if gateways else "") or (homes[0].get("id","") if homes else "")
-        if not gateway_id or not home_id:
-            raise RuntimeError("Gateway/Home für Automatisierung nicht gefunden")
-        if not signing.get("sign_key_id") or not signing.get("hash_sign_key"):
-            raise RuntimeError("Gateway ist nicht vollständig gekoppelt")
-        t=ensure_token(cfg)
-        log(f"CONTROL AUTO: Automatisierung aktivieren, home_id={home_id}, gateway_id={gateway_id}")
-        signed_home_scenario(t["access_token"],home_id,gateway_id,signing["sign_key_id"],signing["hash_sign_key"])
-        pseudo={"name":"VELUX ACTIVE","key":"velux_active","id":gateway_id,"home_id":home_id,"role":"Gateway"}
-        return "Automatisierung aktiviert (scenario=home, signiert)",pseudo
+        # If a specific actor key is provided, enable only that window.
+        if device_key not in ("velux_active","all","home",""):
+            targets=[d for d in devices if str(d.get("udp_key"))==device_key and d.get("role")=="Aktor"]
+        else:
+            # Global helper: enable every actuator currently reporting a VELUX algorithm mode.
+            targets=[d for d in devices if d.get("role")=="Aktor" and str(d.get("mode","")).startswith("algo") or (d.get("role")=="Aktor" and d.get("mode")=="manual")]
+        if not targets:
+            raise RuntimeError("Kein VELUX Fenster für Automatisierung gefunden")
+        t=token(cfg)
+        changed=[]
+        for d in targets:
+            home_id=d.get("home_id","")
+            module_id=d.get("id","")
+            bridge_id=d.get("bridge","")
+            if not home_id or not module_id or not bridge_id:
+                continue
+            log(f"CONTROL AUTO: setze {d.get('name',module_id)} mode=algo_available")
+            set_window_mode(t["access_token"],home_id,module_id,bridge_id,"algo_available")
+            changed.append(d.get("name",module_id))
+        if not changed:
+            raise RuntimeError("Automatisierung konnte keinem Fenster zugeordnet werden")
+        pseudo={"name":"VELUX ACTIVE","key":"velux_active","id":"automation","role":"Automation"}
+        return "Automatisierung aktiviert: "+", ".join(changed),pseudo
     devices=[d for d in state.get("devices",[]) if str(d.get("udp_key"))==device_key]
     if len(devices)!=1: raise RuntimeError(f"Gerät '{device_key}' nicht eindeutig gefunden")
     d=devices[0]

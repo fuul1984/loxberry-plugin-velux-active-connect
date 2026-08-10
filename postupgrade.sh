@@ -40,8 +40,14 @@ chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/velux_scheduler.py" 2>/dev/null || 
 
 # Dependency for signed VELUX gateway control
 "$LBROOT/bin/plugins/$PLUGIN_FOLDER/install_dependencies.sh" "$@" || true
+
+chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_listener.py"          "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh"          "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_cli.py" 2>/dev/null || true
+
+# PID-Datei aus dem Backup darf nie weiterverwendet werden:
+# der alte Listener-Prozess wurde vor dem Upgrade beendet.
+rm -f "$LBROOT/data/plugins/$PLUGIN_FOLDER/control_listener.pid"
+
+# Listener mit dem NEU installierten Code neu starten, falls UDP-Steuerung aktiviert ist.
+"$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh" >/dev/null 2>&1 || true
+
 exit 0
-
-chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_listener.py" "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh" 2>/dev/null || true
-
-chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_cli.py" 2>/dev/null || true

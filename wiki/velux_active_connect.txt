@@ -2,23 +2,27 @@
 
 **Status:** Beta / Community-Test   **Version:** 0.5.12   **Minimum LoxBerry:** 4.0.0
 
-VELUX Active Connect verbindet VELUX ACTIVE / VELUX App Control mit LoxBerry und Loxone. Geräte- und Raumwerte werden über die VELUX-Cloud gelesen, ausgewählte Werte per UDP an Loxone gesendet und Fenster können über Web oder Loxone gesteuert werden.
+VELUX Active Connect verbindet VELUX ACTIVE mit LoxBerry und Loxone. Geräte- und Raumwerte werden automatisch gelesen und ausgewählte Werte per UDP an Loxone übertragen. Unterstützte Dachfenster können per Web oder UDP gesteuert werden.
 
 \===== Funktionen =====
 
-- VELUX Cloud Login mit Token-Refresh
+- VELUX ACTIVE Cloud-Anbindung
 - Homes, Räume und Geräte automatisch erkennen
-- Temperatur, Feuchte, CO₂, Helligkeit, Luftqualität und weitere Werte
-- Regensignal, sofern von VELUX gemeldet
+- Temperatur, Feuchtigkeit, CO₂, Helligkeit und weitere Werte
+- Regenstatus, sofern von VELUX gemeldet
 - Frei wählbare UDP-Werte für Loxone
 - Alle Werte oder nur Änderungen senden
 - Heartbeat
-- Web- und UDP-Steuerung: AUF, STOP, ZU und Position
-- Gateway-Kopplung für signierte Befehle
-- VELUX ACTIVE Automatisierung wieder aktivieren
+- Steuerung: AUF, STOP, ZU und Position
+- Gateway-Kopplung für signierte Positions-/AUF-Befehle
 - Plugin auf der Statusseite aktiv/inaktiv schalten
+- VELUX ACTIVE Automatisierung wieder aktivieren
 - Einstellungen und Kopplung bleiben bei Updates erhalten
 - GitHub AutoUpdate
+
+\===== Abrufintervall =====
+
+Für den aktuellen Betrieb werden **3 Minuten** empfohlen.
 
 \===== Loxone Steuerung =====
 
@@ -35,24 +39,39 @@ velux.cmd.dachfenster_bad.stop=1
 velux.cmd.dachfenster_bad.close=1
 velux.cmd.dachfenster_bad.position=50
 
-VELUX ACTIVE Automatisierung wieder freigeben:
+\===== VELUX ACTIVE Automatisierung =====
+
+Nach manueller Fenstersteuerung kann der Fenstermodus auf ''manual'' stehen.
+
+Mit folgendem Befehl wird die VELUX ACTIVE Automatik wieder freigegeben:
 
 \<code ->
 velux.cmd.velux_active.automation=1
 
-Der Automatisierungsbefehl verwendet das signierte Gateway-Szenario ''home'' und benötigt eine erfolgreiche Gateway-Kopplung.
+Intern setzt das Plugin die betroffenen VELUX-Fenster auf:
+
+\<code ->
+mode=algo_available
+
+''manual'' bedeutet Automatik aus.
+
+''algo_available'' und ''algo_active'' bedeuten Automatik aktiv.
+
+Der Befehl ist auch als Button auf der Seite **Steuerung** verfügbar.
 
 \===== Gateway-Kopplung =====
 
-Die Gateway-Kopplung wird unter **Einstellungen** durchgeführt. Die Signierschlüssel werden lokal gespeichert und bleiben bei normalen Updates erhalten.
+Die Gateway-Kopplung wird für signierte AUF-/Positionsbefehle verwendet. Die Kopplungsdaten bleiben bei normalen Updates erhalten.
 
-\===== Scheduler =====
+\===== Plugin Aktiv/Inaktiv =====
 
-Der LoxBerry-Cron läuft jede Minute. Das konfigurierte Abrufintervall entscheidet, wann der nächste Cloud-Abruf ausgeführt wird. Für den aktuellen Testbetrieb werden 3 Minuten empfohlen.
+Auf der Statusseite kann das Plugin aktiviert oder deaktiviert werden.
+
+Bei **Inaktiv** werden automatische Abrufe und eingehende UDP-Steuerbefehle gestoppt. Einstellungen und Kopplung bleiben erhalten.
 
 \===== Logging =====
 
-Cloud-Abrufe, UDP-Nachrichten, Steuerbefehle und Fehler werden protokolliert. Zugangsdaten, Tokens und private Signierschlüssel werden nicht im Klartext ausgegeben.
+Cloud-Abrufe, UDP-Nachrichten, Steuerbefehle und Fehler werden protokolliert.
 
 Bei einer Neuinstallation wird das Hauptlog geleert. Bei einem Update bleibt es erhalten.
 
@@ -65,4 +84,4 @@ https\://github.com/fuul1984/loxberry-plugin-velux-active-connect
 
 \===== Version =====
 
-Aktueller Teststand: **0.5.12**
+Aktueller Stand: **0.5.12**

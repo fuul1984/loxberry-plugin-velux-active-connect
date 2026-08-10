@@ -56,4 +56,8 @@ chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_cli.py" 2>/dev/null || true
 chown loxberry:loxberry "$LOG/veluxactive.log" 2>/dev/null || true
 chmod 644 "$LOG/veluxactive.log" 2>/dev/null || true
 
+# UDP-Control-Listener nach Neuinstallation starten, falls aktiviert.
+rm -f "$DATA/control_listener.pid"
+"$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh" >/dev/null 2>&1 || true
+
 exit 0
