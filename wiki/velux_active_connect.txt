@@ -1,79 +1,285 @@
 \====== VELUX Active Connect ======
 
-**Status:** Beta / Community-Test   **Version:** 0.9.0   **Minimum LoxBerry:** 4.0.0
+**Status:** Stable   **Version:** 1.0.0   **Minimum LoxBerry:** 4.0.0
 
-VELUX Active Connect verbindet VELUX ACTIVE mit LoxBerry und Loxone. Geräte- und Raumwerte werden automatisch gelesen und ausgewählte Werte per UDP an Loxone übertragen. Unterstützte Dachfenster können per Web oder UDP gesteuert werden.
+VELUX Active Connect verbindet VELUX ACTIVE / VELUX App Control mit LoxBerry und Loxone. Zustände von Räumen und Geräten werden automatisch gelesen und frei konfigurierbar per UDP an Loxone übertragen. Unterstützte VELUX-Dachfenster können direkt aus dem Plugin oder aus Loxone gesteuert werden.
 
 \===== Funktionen =====
 
 - VELUX ACTIVE Cloud-Anbindung
-- Homes, Räume und Geräte automatisch erkennen
-- Temperatur, Feuchtigkeit, CO₂, Helligkeit und weitere Werte
-- Regenstatus, sofern von VELUX gemeldet
-- Frei wählbare UDP-Werte für Loxone
-- Alle Werte oder nur Änderungen senden
+- Automatische Home-, Raum- und Geräteerkennung
+- Temperatur, Feuchtigkeit, CO₂, Helligkeit, Luftqualität und weitere Werte
+- Regenstatus, sofern vom Gateway bereitgestellt
+- Frei wählbare UDP-Rückmeldungen für Loxone
+- Wahlweise alle Werte oder nur Änderungen senden
 - Heartbeat
-- Steuerung: AUF, STOP, ZU und Position
-- Gateway-Kopplung für signierte Positions-/AUF-Befehle
-- Plugin auf der Statusseite aktiv/inaktiv schalten
+- UDP-Steuerung von Loxone zu VELUX
+- Web-Steuerung direkt im Plugin
+- AUF, STOP, ZU und Position
+- Gateway-Kopplung für signierte Befehle
 - VELUX ACTIVE Automatisierung wieder aktivieren
-- Einstellungen und Kopplung bleiben bei Updates erhalten
+- Plugin Aktiv/Inaktiv
+- Status mit Lauf- und Kopplungsinformationen
+- Update-sichere Einstellungen und UDP-Auswahl
 - GitHub AutoUpdate
+- Logging und Diagnose
 
-\===== Abrufintervall =====
+\===== Voraussetzungen =====
 
-Für den aktuellen Betrieb werden **3 Minuten** empfohlen.
+- LoxBerry 4.0.0 oder neuer
+- VELUX ACTIVE / App Control Installation
+- Gültiges VELUX Benutzerkonto
+- Netzwerkverbindung zwischen LoxBerry und Internet
+- Netzwerkverbindung zwischen Loxone Miniserver und LoxBerry
+- Für signierte Steuerbefehle ein erreichbares VELUX Gateway
 
-\===== Loxone Steuerung =====
+\===== Installation =====
 
-Virtueller UDP-Ausgang:
+- Plugin-ZIP über die LoxBerry Pluginverwaltung installieren.
+- **VELUX Active Connect** öffnen.
+- Unter **Einstellungen** VELUX Zugangsdaten eintragen.
+- Loxone Miniserver auswählen.
+- UDP-Sende- und Empfangsport konfigurieren.
+- Abrufintervall einstellen.
+- Einstellungen speichern.
+- **VELUX Daten jetzt abrufen** ausführen.
+- Unter **UDP Messages** die gewünschten Werte auswählen.
+- Bei Bedarf das VELUX Gateway koppeln.
+
+\===== Einstellungen =====
+
+\==== VELUX ACTIVE ====
+
+- E-Mail
+- Passwort
+- Abrufintervall
+- Plugin aktiv/inaktiv
+
+\==== Loxone UDP - Rückmeldungen ====
+
+Dieser Bereich steuert:
 
 \<code ->
-/dev/udp/LOXBERRY-IP/7001
+VELUX ACTIVE -> LoxBerry -> Loxone
+
+Konfiguriert werden:
+
+- UDP-Ausgabe aktivieren
+- Miniserver
+- UDP-Sendeport
+- UDP-Präfix
+- Heartbeat
+- Sendeverhalten
+
+\==== Loxone UDP-Steuerung ====
+
+Dieser Bereich steuert:
+
+\<code ->
+Loxone -> LoxBerry -> VELUX ACTIVE
+
+Konfiguriert werden:
+
+- UDP-Steuerung aktivieren
+- UDP-Empfangsport
+- Befehls-Präfix, Standard ''velux.cmd''
+
+\===== UDP Messages =====
+
+Nach einem erfolgreichen Abruf werden alle verfügbaren Werte angezeigt. Jeder Wert kann einzeln aktiviert oder deaktiviert werden.
 
 Beispiele:
 
 \<code ->
+velux.module.dachfenster_bad.position=50
+
+\<code ->
+velux.module.velux_gateway.reachable=1
+
+\<code ->
+velux.room.bad.temperature=23.7
+
+Ab Version 1.0.0 werden UDP-Telegramme sauber als ''key=value'' übertragen.
+
+\===== Heartbeat =====
+
+Beispiel:
+
+\<code ->
+velux.heartbeat=1
+
+\===== Loxone UDP-Steuerung =====
+
+Virtuellen UDP-Ausgang in Loxone Config anlegen.
+
+Adresse:
+
+\<code ->
+/dev/udp/LOXBERRY-IP/PORT
+
+**Verbindung nach Senden schließen** aktivieren.
+
+\==== Fenster öffnen ====
+
+\<code ->
 velux.cmd.dachfenster_bad.open=1
-velux.cmd.dachfenster_bad.stop=1
+
+\==== Fenster schließen ====
+
+\<code ->
 velux.cmd.dachfenster_bad.close=1
+
+\==== Fenster stoppen ====
+
+\<code ->
+velux.cmd.dachfenster_bad.stop=1
+
+\==== Position ====
+
+\<code ->
 velux.cmd.dachfenster_bad.position=50
 
 \===== VELUX ACTIVE Automatisierung =====
 
-Nach manueller Fenstersteuerung kann der Fenstermodus auf ''manual'' stehen.
+Nach manueller Fenstersteuerung kann VELUX den Fenstermodus auf ''manual'' setzen.
 
-Mit folgendem Befehl wird die VELUX ACTIVE Automatik wieder freigegeben:
+Die Automatik wird mit folgendem Befehl wieder freigegeben:
 
 \<code ->
 velux.cmd.velux_active.automation=1
 
-Intern setzt das Plugin die betroffenen VELUX-Fenster auf:
+Intern setzt das Plugin:
 
 \<code ->
 mode=algo_available
 
-''manual'' bedeutet Automatik aus.
+Bedeutung:
 
-''algo_available'' und ''algo_active'' bedeuten Automatik aktiv.
+- ''manual'' = manueller Betrieb
+- ''algo_available'' = Automatik freigegeben
+- ''algo_active'' = Automatik greift aktuell aktiv ein
 
-Der Befehl ist auch als Button auf der Seite **Steuerung** verfügbar.
+Der gleiche Befehl steht auch als Button auf der Seite **Steuerung** zur Verfügung.
 
-\===== Gateway-Kopplung =====
+\===== Gateway Kopplung =====
 
-Die Gateway-Kopplung wird für signierte AUF-/Positionsbefehle verwendet. Die Kopplungsdaten bleiben bei normalen Updates erhalten.
+Für signierte AUF- und Positionsbefehle kann eine Gateway-Kopplung erforderlich sein.
 
-\===== Plugin Aktiv/Inaktiv =====
+Nach erfolgreicher Kopplung zeigt die Statusseite:
 
-Auf der Statusseite kann das Plugin aktiviert oder deaktiviert werden.
+\<code ->
+Status: Verbunden
+Gateway Kopplung: Gekoppelt
 
-Bei **Inaktiv** werden automatische Abrufe und eingehende UDP-Steuerbefehle gestoppt. Einstellungen und Kopplung bleiben erhalten.
+Die Kopplungsdaten bleiben bei Updates erhalten.
+
+\===== Plugin Aktiv / Inaktiv =====
+
+Bei **Inaktiv** werden automatische Abrufe und UDP-Steuerung gestoppt. Einstellungen und Kopplung bleiben erhalten.
+
+\===== Scheduler =====
+
+Der Scheduler prüft regelmäßig, ob ein neuer Abruf fällig ist.
+
+Empfohlenes Abrufintervall:
+
+\<code ->
+3 Minuten
+
+\===== Status =====
+
+Die Statusseite zeigt:
+
+- Verbindungsstatus
+- Gateway-Kopplungsstatus
+- Plugin Aktiv/Inaktiv
+- Letzter Abruf
+- Abrufintervall
+- Nächster Lauf
+- erkannte Geräte
+
+Die Version wird zentral aus ''plugin.cfg'' gelesen und nur im oberen VELUX-Balken angezeigt.
+
+\===== Steuerung =====
+
+Unterstützt werden:
+
+- AUF
+- STOP
+- ZU
+- Position
+- VELUX ACTIVE Automatisierung aktivieren
 
 \===== Logging =====
 
-Cloud-Abrufe, UDP-Nachrichten, Steuerbefehle und Fehler werden protokolliert.
+Das Log enthält Abrufe, Werte, UDP-Kommunikation, Steuerbefehle, Scheduler und Fehler.
 
-Bei einer Neuinstallation wird das Hauptlog geleert. Bei einem Update bleibt es erhalten.
+Bei Neuinstallation wird das Hauptlog geleert. Bei Updates bleibt es erhalten.
+
+\===== Backup und Update =====
+
+Bei Updates bleiben erhalten:
+
+- VELUX Zugangsdaten
+- Loxone Miniserver
+- UDP-Sende- und Empfangseinstellungen
+- UDP-Auswahl
+- UDP-Namen
+- Heartbeat-Einstellungen
+- Gateway-Kopplung
+- Signierschlüssel
+
+Zusätzlich wird ''config.json'' gesichert.
+
+Der UDP-Listener wird vor einem Update beendet und danach mit dem neuen Code neu gestartet.
+
+\===== AutoUpdate =====
+
+Stable:
+
+\<code ->
+release.cfg
+
+Pre-Release:
+
+\<code ->
+prerelease.cfg
+
+\===== Fehlerbehebung =====
+
+\==== UDP-Werte kommen nicht an ====
+
+- UDP-Ausgabe prüfen
+- Miniserver prüfen
+- UDP-Port prüfen
+- UDP Messages aktivieren
+- Firewall prüfen
+- Log prüfen
+
+\==== UDP-Steuerung funktioniert nicht ====
+
+- UDP-Steuerung aktivieren
+- Empfangsport prüfen
+- Loxone Ausgang prüfen
+- Verbindung nach Senden schließen aktivieren
+- Log prüfen
+
+\==== Fenster bleibt auf manual ====
+
+\<code ->
+velux.cmd.velux_active.automation=1
+
+senden.
+
+\==== AUF oder Position schlägt fehl ====
+
+- Gateway-Kopplung prüfen
+- Gateway-Erreichbarkeit prüfen
+- Log prüfen
+
+\===== Sicherheit =====
+
+UDP besitzt keine eigene Authentifizierung. Der UDP-Port sollte nur im lokalen vertrauenswürdigen Netzwerk erreichbar sein.
 
 \===== GitHub =====
 
@@ -82,6 +288,13 @@ Repository:
 \<code ->
 https\://github.com/fuul1984/loxberry-plugin-velux-active-connect
 
+Releases:
+
+\<code ->
+https\://github.com/fuul1984/loxberry-plugin-velux-active-connect/releases
+
 \===== Version =====
 
-Aktueller Stand: **0.9.0**
+Aktueller Stand: **1.0.0**
+
+Status: **Stable**
