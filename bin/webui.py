@@ -149,16 +149,12 @@ def save_main_settings():
 
 def save_udp_settings():
     global cfg
-    cfg["udp_enabled"]="udp_enabled" in form
-    cfg["miniserver_no"]=max(1,int(form.get("miniserver_no",cfg.get("miniserver_no",1))))
-    cfg["udp_port"]=int(form.get("udp_port",cfg.get("udp_port",7000)))
-    cfg["udp_prefix"]=form.get("udp_prefix",cfg.get("udp_prefix","velux")).strip() or "velux"
-    cfg["heartbeat_enabled"]="heartbeat_enabled" in form
-    cfg["udp_heartbeat_key"]=form.get("udp_heartbeat_key",cfg.get("udp_heartbeat_key","heartbeat")).strip() or "heartbeat"
-    cfg["udp_auto_new"]="udp_auto_new" in form
-    old_mode=str(cfg.get("udp_send_mode","always"))
-    mode=form.get("udp_send_mode",old_mode)
-    cfg["udp_send_mode"]=mode if mode in ("always","changed") else "always"
+    # IMPORTANT:
+    # The "UDP Messages" page contains only the per-value selection/name fields.
+    # Do NOT modify general UDP settings here (udp_enabled, heartbeat_enabled,
+    # udp_auto_new, miniserver, ports, prefix, send mode). Those belong only
+    # to the Settings page. Previously the missing checkboxes were interpreted
+    # as False and silently disabled UDP/Heartbeat when saving message choices.
     rules=cfg.get("udp_messages",{}) if isinstance(cfg.get("udp_messages",{}),dict) else {}
     try: count=int(form.get("udp_count","0"))
     except: count=0

@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.5.12
+- UDP-Messages-Speicherfehler korrigiert: Speichern der Wertauswahl verändert keine allgemeinen UDP-Einstellungen mehr
+- `udp_enabled`, Heartbeat, Auto-New, Miniserver, Ports, Präfix und Sendemodus bleiben beim Speichern der UDP-Auswahl unverändert
+- zusätzliche Sicherheitskopie von `config.json` im Upgrade-Pfad
 - UDP-Listener-Update korrigiert: laufender Listener wird vor Updates beendet und danach mit neuem Code gestartet
 - veraltete `control_listener.pid` wird bei Updates nicht mehr wiederverwendet
 - behebt den Fall „Web-Befehl funktioniert, UDP-Befehl verwendet noch alten Code“

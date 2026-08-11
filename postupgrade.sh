@@ -13,6 +13,14 @@ for area in config data log; do
         cp -a "$SRC" "$DEST"
     fi
 done
+
+# Fallback: restore the explicit config.json safety copy if the regular
+# config-area restore did not produce a configuration file.
+if [ ! -f "$LBROOT/config/plugins/$PLUGIN_FOLDER/config.json" ] && [ -f "$BACKUP/config.json" ]; then
+    mkdir -p "$LBROOT/config/plugins/$PLUGIN_FOLDER"
+    cp -a "$BACKUP/config.json" "$LBROOT/config/plugins/$PLUGIN_FOLDER/config.json"
+fi
+
 rm -rf "$BACKUP"
 # Make sure new files remain executable after restoring persistent areas.
 chmod +x "$LBROOT/webfrontend/htmlauth/plugins/$PLUGIN_FOLDER/index.cgi" \

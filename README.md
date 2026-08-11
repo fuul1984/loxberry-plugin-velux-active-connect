@@ -112,3 +112,12 @@ velux.cmd.velux_active.automation=1
 - UDP-Listener wird bei Updates jetzt explizit neu gestartet.
 - Alte PID-Dateien werden nicht übernommen.
 - Damit verwendet UDP nach einem Plugin-Update garantiert den neuen `control_listener.py`.
+
+
+### v0.5.12 – UDP-Konfiguration Korrektur
+
+Die Seite **UDP Messages** ändert beim Speichern nur noch die Auswahl und Namen
+der einzelnen Werte. Allgemeine UDP-Einstellungen werden ausschließlich unter
+**Einstellungen** gespeichert und bleiben unverändert.
+
+Zusätzlich wird `config.json` im Upgrade-Pfad separat als Sicherheitskopie gesichert.

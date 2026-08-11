@@ -28,6 +28,12 @@ fi
 
 rm -rf "$BACKUP"
 mkdir -p "$BACKUP"
+
+# Extra safety copy of the complete plugin configuration.
+# This includes UDP message selections and all UDP send settings.
+if [ -f "$LBROOT/config/plugins/$PLUGIN_FOLDER/config.json" ]; then
+    cp -a "$LBROOT/config/plugins/$PLUGIN_FOLDER/config.json" "$BACKUP/config.json"
+fi
 for area in config data log; do
     SRC="$LBROOT/$area/plugins/$PLUGIN_FOLDER"
     if [ -d "$SRC" ]; then
