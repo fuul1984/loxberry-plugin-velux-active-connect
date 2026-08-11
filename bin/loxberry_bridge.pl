@@ -44,8 +44,8 @@ if ($mode eq 'send') {
         my $value = $data->{$key};
         if (ref($value)) { next; }
         $value = $value ? 1 : 0 if JSON::PP::is_bool($value);
-        my $msg = $prefix . '.' . $key . '=' . $value;
-        my $ok = LoxBerry::IO::msudp_send($msno, $port, undef, $msg);
+        my %send = ($prefix . '.' . $key => $value);
+        my $ok = LoxBerry::IO::msudp_send($msno, $port, undef, %send);
         die "UDP send failed for $key\n" unless defined $ok;
         $count++;
     }

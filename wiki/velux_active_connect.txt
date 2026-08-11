@@ -1,6 +1,6 @@
 \====== VELUX Active Connect ======
 
-**Status:** Beta / Community-Test   **Version:** 0.5.12   **Minimum LoxBerry:** 4.0.0
+**Status:** Beta / Community-Test   **Version:** 0.9.0   **Minimum LoxBerry:** 4.0.0
 
 VELUX Active Connect verbindet VELUX ACTIVE mit LoxBerry und Loxone. Geräte- und Raumwerte werden automatisch gelesen und ausgewählte Werte per UDP an Loxone übertragen. Unterstützte Dachfenster können per Web oder UDP gesteuert werden.
 
@@ -84,4 +84,4 @@ https\://github.com/fuul1984/loxberry-plugin-velux-active-connect
 
 \===== Version =====
 
-Aktueller Stand: **0.5.12**
+Aktueller Stand: **0.9.0**

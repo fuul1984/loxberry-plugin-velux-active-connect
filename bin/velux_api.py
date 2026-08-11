@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, time, urllib.parse, urllib.request, urllib.error
 from typing import Any
+from version import plugin_version
 
 BASE_URL = "https://api.netatmo.com/"
 TOKEN_URL = BASE_URL + "oauth2/token"
@@ -13,7 +14,7 @@ CLIENT_SECRET = "6ae2d89d15e767ae5c56b456b452d319"
 APP_VERSION = "791302006"
 USER_PREFIX = "velux"
 SCOPE = "velux_scopes"
-USER_AGENT = "VELUX-Active-Connect-LoxBerry/0.5.12"
+USER_AGENT = f"VELUX-Active-Connect-LoxBerry/{plugin_version()}"
 
 class VeluxError(RuntimeError):
     pass

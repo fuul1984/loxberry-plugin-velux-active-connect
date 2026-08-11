@@ -1,7 +1,8 @@
 from __future__ import annotations
 import html, json, os, subprocess, sys, time, urllib.parse
 from pathlib import Path
-PLUGIN="veluxactive"; VERSION="0.5.12"
+from version import plugin_version
+PLUGIN="veluxactive"; VERSION=plugin_version()
 LBROOT=Path(os.environ.get("LBHOMEDIR","/opt/loxberry"))
 CFG=Path(os.environ.get("LBPCONFIGDIR", str(LBROOT/f"config/plugins/{PLUGIN}")))
 DATA=Path(os.environ.get("LBPDATADIR", str(LBROOT/f"data/plugins/{PLUGIN}")))
@@ -351,7 +352,7 @@ elif page=="udp":
     print('<p><button class="btn primary" name="action" value="save_udp">UDP Messages speichern</button></p></div></form>')
 elif page=="control":
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
-    print('<div class="card"><h2>Steuerung <span class="badge">v0.5.12</span></h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
+    print('<div class="card"><h2>Steuerung <span class="badge">v{esc(VERSION)}</span></h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
     paired=True
     print('<div class="card"><h2>VELUX ACTIVE Automatisierung</h2>')
     print('<p>Setzt den VELUX Fenstermodus wieder auf <code>algo_available</code> und gibt damit die automatische Lüftung wieder frei.</p>')

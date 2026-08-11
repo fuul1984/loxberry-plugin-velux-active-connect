@@ -121,3 +121,13 @@ der einzelnen Werte. Allgemeine UDP-Einstellungen werden ausschließlich unter
 **Einstellungen** gespeichert und bleiben unverändert.
 
 Zusätzlich wird `config.json` im Upgrade-Pfad separat als Sicherheitskopie gesichert.
+
+
+## v0.9.0
+
+Stabiler Stand auf Basis der getesteten v0.5.12.
+
+- Version wird in ausführbarem Code zentral aus `plugin.cfg` gelesen.
+- UDP-Telegramme werden sauber als `key=value` gesendet.
+- VELUX ACTIVE Automatisierung: `velux.cmd.velux_active.automation=1`.
+- Update-sichere UDP-Konfiguration und sauberer Listener-Neustart.

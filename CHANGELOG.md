@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+- Release-Kandidat vor 1.0.0
+- Zentrale Versionsquelle: `plugin.cfg`; WebUI und User-Agent lesen die Version automatisch
+- UDP-Ausgabe korrigiert: LoxBerry `msudp_send()` erhält echte Key/Value-Paare, kein zusätzliches `=` mehr
+- VELUX ACTIVE Automatisierung per `velux.cmd.velux_active.automation=1` mit `mode=algo_available`
+- UDP-Listener wird bei Updates sauber beendet und mit aktuellem Code neu gestartet
+- UDP-Sendeeinstellungen und Wertauswahl bleiben bei Updates erhalten
+- Plugin Aktiv/Inaktiv, Gateway-Kopplung, Scheduler und Diagnose aus dem getesteten 0.5.12-Stand übernommen
+
 ## 0.5.12
 - UDP-Messages-Speicherfehler korrigiert: Speichern der Wertauswahl verändert keine allgemeinen UDP-Einstellungen mehr
 - `udp_enabled`, Heartbeat, Auto-New, Miniserver, Ports, Präfix und Sendemodus bleiben beim Speichern der UDP-Auswahl unverändert
