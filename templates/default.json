@@ -25,7 +25,8 @@
   "control": {
     "enabled": false,
     "udp_listen_port": 7001,
-    "command_prefix": "velux.cmd"
+    "command_prefix": "velux.cmd",
+    "allowed_senders": []
   },
   "udp_send_mode": "always",
   "plugin_enabled": true

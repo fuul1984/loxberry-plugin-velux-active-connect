@@ -1,300 +1,431 @@
-\====== VELUX Active Connect ======
+====== VELUX Active Connect ======
 
-**Status:** Stable   **Version:** 1.0.0   **Minimum LoxBerry:** 4.0.0
+**Status:** Stable  
+**Version:** 1.1.0  
+**Minimum LoxBerry:** 4.0.0
 
-VELUX Active Connect verbindet VELUX ACTIVE / VELUX App Control mit LoxBerry und Loxone. Zustände von Räumen und Geräten werden automatisch gelesen und frei konfigurierbar per UDP an Loxone übertragen. Unterstützte VELUX-Dachfenster können direkt aus dem Plugin oder aus Loxone gesteuert werden.
+Version 1.1.0 bündelt die seit dem letzten offiziellen Stable-Release 1.0.0 vorgenommenen Verbesserungen an Sicherheit, Reboot-Robustheit, UDP, Logging und responsiver Weboberfläche.
 
-\===== Funktionen =====
+VELUX Active Connect verbindet VELUX ACTIVE / VELUX App Control mit LoxBerry und Loxone. Das Plugin erkennt Homes, Räume und Geräte über die verwendete VELUX-/Netatmo-Schnittstelle, liest Statuswerte aus und überträgt ausgewählte Werte per UDP an Loxone. Unterstützte Geräte können zusätzlich aus dem Plugin oder per UDP von Loxone gesteuert werden.
 
-- VELUX ACTIVE Cloud-Anbindung
-- Automatische Home-, Raum- und Geräteerkennung
-- Temperatur, Feuchtigkeit, CO₂, Helligkeit, Luftqualität und weitere Werte
-- Regenstatus, sofern vom Gateway bereitgestellt
-- Frei wählbare UDP-Rückmeldungen für Loxone
-- Wahlweise alle Werte oder nur Änderungen senden
-- Heartbeat
-- UDP-Steuerung von Loxone zu VELUX
-- Web-Steuerung direkt im Plugin
-- AUF, STOP, ZU und Position
-- Gateway-Kopplung für signierte Befehle
-- VELUX ACTIVE Automatisierung wieder aktivieren
-- Plugin Aktiv/Inaktiv
-- Status mit Lauf- und Kopplungsinformationen
-- Update-sichere Einstellungen und UDP-Auswahl
-- GitHub AutoUpdate
-- Logging und Diagnose
+===== Übersicht =====
 
-\===== Voraussetzungen =====
+Die Integration trennt Oberfläche, Konfiguration, Scheduler, API-Kommunikation und UDP-Kommunikation voneinander:
 
-- LoxBerry 4.0.0 oder neuer
-- VELUX ACTIVE / App Control Installation
-- Gültiges VELUX Benutzerkonto
-- Netzwerkverbindung zwischen LoxBerry und Internet
-- Netzwerkverbindung zwischen Loxone Miniserver und LoxBerry
-- Für signierte Steuerbefehle ein erreichbares VELUX Gateway
+<code>
+cron.01min -> Scheduler -> Intervallprüfung -> Worker -> VELUX API -> UDP an Loxone
+</code>
 
-\===== Installation =====
+Steuerbefehle laufen separat über einen dauerhaft überwachten Listener:
 
-- Plugin-ZIP über die LoxBerry Pluginverwaltung installieren.
-- **VELUX Active Connect** öffnen.
-- Unter **Einstellungen** VELUX Zugangsdaten eintragen.
-- Loxone Miniserver auswählen.
-- UDP-Sende- und Empfangsport konfigurieren.
-- Abrufintervall einstellen.
-- Einstellungen speichern.
-- **VELUX Daten jetzt abrufen** ausführen.
-- Unter **UDP Messages** die gewünschten Werte auswählen.
-- Bei Bedarf das VELUX Gateway koppeln.
+<code>
+Loxone -> UDP -> Listener/Daemon -> Validierung -> VELUX API
+</code>
 
-\===== Einstellungen =====
+Die CGI-Seiten dienen der Oberfläche und interaktiven Aktionen. Periodische API-Abfragen laufen nicht im CGI.
 
-\==== VELUX ACTIVE ====
+===== Funktionen =====
 
-- E-Mail
-- Passwort
-- Abrufintervall
-- Plugin aktiv/inaktiv
+  * VELUX ACTIVE Cloud-Anbindung
+  * automatische Home-, Raum- und Geräteerkennung
+  * Gateway-Kopplung für signierte Steuerbefehle
+  * Access-/Refresh-Token-Verwaltung
+  * Temperatur, Feuchtigkeit, CO₂, Helligkeit, Luftqualität und weitere von VELUX gemeldete Werte
+  * Regenstatus, sofern von VELUX bereitgestellt
+  * frei wählbare UDP-Rückmeldungen für Loxone
+  * wahlweise alle Werte oder nur Änderungen senden
+  * Boolean-Werte konsequent als ''1'' oder ''0''
+  * Heartbeat
+  * UDP-Steuerung von Loxone zu VELUX
+  * Prüfung erlaubter UDP-Absender
+  * Fenstersteuerung: AUF, STOP, ZU und Position, sofern vom Gerät unterstützt
+  * Wiederaufnahme der VELUX ACTIVE Automatik
+  * Plugin Aktiv/Inaktiv
+  * Scheduler/Worker mit Lock gegen parallele API-Läufe
+  * UDP-Listener mit Watchdog und automatischem Neustart
+  * update-sichere Einstellungen, Tokens, UDP-Auswahl und Gateway-Daten
+  * zentrale Versionsanzeige über ''plugin.cfg''
+  * Loxone-Export mit konfiguriertem UDP-Präfix und individuellen UDP-Namen
+  * Logging und Diagnose
 
-\==== Loxone UDP - Rückmeldungen ====
+===== Voraussetzungen =====
 
-Dieser Bereich steuert:
+  * LoxBerry 4.0.0 oder neuer
+  * VELUX ACTIVE / VELUX App Control Installation
+  * gültiges VELUX Benutzerkonto
+  * Netzwerk-/Internetzugriff des LoxBerry zur VELUX-Schnittstelle
+  * Netzwerkverbindung zwischen LoxBerry und Loxone Miniserver
+  * für signierte Befehle ein erreichbares und gekoppeltes VELUX Gateway
 
-\<code ->
+===== Installation =====
+
+  - ''VELUX_Active_Connect_v1.1.0.zip'' über die LoxBerry Pluginverwaltung installieren.
+  - **VELUX Active Connect** öffnen.
+  - Unter **Einstellungen** die VELUX-Zugangsdaten eintragen.
+  - Loxone Miniserver und UDP-Ports auswählen.
+  - Abrufintervall konfigurieren.
+  - Einstellungen speichern.
+  - **VELUX Daten jetzt abrufen** ausführen.
+  - Unter **UDP Messages** die gewünschten Werte auswählen.
+  - Falls für Steuerbefehle erforderlich, das VELUX Gateway koppeln.
+  - Auf der Seite **Status** Verbindung, Kopplung und letzten erfolgreichen Abruf kontrollieren.
+
+===== Anmeldung =====
+
+Für die Anmeldung werden die Zugangsdaten des VELUX ACTIVE / VELUX App Control Kontos verwendet.
+
+Das Plugin nutzt nach erfolgreicher Anmeldung bevorzugt den Refresh-Token zur Token-Erneuerung. Nur wenn eine Erneuerung nicht möglich ist, wird der vorhandene Login-Fallback verwendet.
+
+Zugangsdaten werden bei einem erfolgreichen Token-Refresh nicht automatisch gelöscht, damit eine spätere erneute Anmeldung oder Gateway-Aktion weiterhin möglich bleibt.
+
+===== Gateway-Kopplung =====
+
+Für bestimmte signierte Steuerbefehle kann eine Gateway-Kopplung erforderlich sein.
+
+Nach erfolgreicher Kopplung zeigt die Statusseite sinngemäß:
+
+<code>
+API: Verbunden
+Gateway: Gekoppelt
+</code>
+
+Die Kopplungsinformationen und Signierschlüssel bleiben bei Updates erhalten.
+
+===== Einstellungen =====
+
+==== VELUX ACTIVE ====
+
+  * E-Mail
+  * Passwort
+  * Abrufintervall
+  * Plugin aktiv/inaktiv
+
+==== Loxone UDP – Rückmeldungen ====
+
+Datenrichtung:
+
+<code>
 VELUX ACTIVE -> LoxBerry -> Loxone
+</code>
 
-Konfiguriert werden:
+Konfigurierbar sind insbesondere:
 
-- UDP-Ausgabe aktivieren
-- Miniserver
-- UDP-Sendeport
-- UDP-Präfix
-- Heartbeat
-- Sendeverhalten
+  * UDP-Ausgabe aktiv/inaktiv
+  * Ziel-Miniserver aus der LoxBerry-Grundkonfiguration
+  * UDP-Sendeport
+  * UDP-Präfix
+  * Heartbeat
+  * Sendeverhalten: alle Werte oder nur Änderungen
 
-\==== Loxone UDP-Steuerung ====
+==== Loxone UDP – Steuerung ====
 
-Dieser Bereich steuert:
+Datenrichtung:
 
-\<code ->
+<code>
 Loxone -> LoxBerry -> VELUX ACTIVE
+</code>
 
-Konfiguriert werden:
+Konfigurierbar sind insbesondere:
 
-- UDP-Steuerung aktivieren
-- UDP-Empfangsport
-- Befehls-Präfix, Standard ''velux.cmd''
+  * UDP-Steuerung aktiv/inaktiv
+  * UDP-Empfangsport
+  * Befehlspräfix, Standard ''velux.cmd''
+  * erlaubte Absender / LoxBerry-Miniserver
 
-\===== UDP Messages =====
+===== Geräte und Werte =====
 
-Nach einem erfolgreichen Abruf werden alle verfügbaren Werte angezeigt. Jeder Wert kann einzeln aktiviert oder deaktiviert werden.
+Nach einem erfolgreichen Abruf werden die von VELUX erkannten Homes, Räume, Module und Geräte verarbeitet. Die verfügbaren Werte werden dynamisch ermittelt.
+
+Unter **UDP Messages** kann jeder relevante Wert einzeln aktiviert oder deaktiviert und – sofern angeboten – mit einem individuellen UDP-Namen versehen werden.
 
 Beispiele:
 
-\<code ->
+<code>
 velux.module.dachfenster_bad.position=50
-
-\<code ->
 velux.module.velux_gateway.reachable=1
-
-\<code ->
 velux.room.bad.temperature=23.7
+</code>
 
-Ab Version 1.0.0 werden UDP-Telegramme sauber als ''key=value'' übertragen.
+Boolean-Werte werden für Loxone als ''1'' bzw. ''0'' übertragen.
 
-\===== Heartbeat =====
+===== UDP =====
+
+Das Grundschema für Rückmeldungen lautet:
+
+<code>
+velux.<gerät>.<wert>=<value>
+</code>
+
+Bestehende veröffentlichte Namen bleiben aus Kompatibilitätsgründen erhalten. Der tatsächliche Präfix kann in den Einstellungen angepasst werden.
+
+UDP-Telegramme werden als sauberes ''key=value'' ohne zusätzliche Steuerzeichen übertragen.
+
+==== Heartbeat ====
 
 Beispiel:
 
-\<code ->
+<code>
 velux.heartbeat=1
+</code>
 
-\===== Loxone UDP-Steuerung =====
+''1'' bedeutet betriebsbereit. Ein Fehlerzustand wird entsprechend als ''0'' signalisiert, sofern Heartbeat aktiviert ist.
 
-Virtuellen UDP-Ausgang in Loxone Config anlegen.
+===== Steuerung =====
 
-Adresse:
+Das Grundschema für Steuerbefehle lautet:
 
-\<code ->
-/dev/udp/LOXBERRY-IP/PORT
+<code>
+velux.cmd.<gerät>.<command>=<value>
+</code>
 
-**Verbindung nach Senden schließen** aktivieren.
+Nur Befehle, die das jeweilige Gerät unterstützt, sollten verwendet werden.
 
-\==== Fenster öffnen ====
+Typische Befehle:
 
-\<code ->
+<code>
 velux.cmd.dachfenster_bad.open=1
-
-\==== Fenster schließen ====
-
-\<code ->
-velux.cmd.dachfenster_bad.close=1
-
-\==== Fenster stoppen ====
-
-\<code ->
 velux.cmd.dachfenster_bad.stop=1
-
-\==== Position ====
-
-\<code ->
+velux.cmd.dachfenster_bad.close=1
 velux.cmd.dachfenster_bad.position=50
+</code>
 
-\===== VELUX ACTIVE Automatisierung =====
+Für API-Aufrufe notwendige Kontexte wie ''home_id'' werden vom Plugin berücksichtigt.
 
-Nach manueller Fenstersteuerung kann VELUX den Fenstermodus auf ''manual'' setzen.
+===== VELUX-Automatik =====
 
-Die Automatik wird mit folgendem Befehl wieder freigegeben:
+Manuelle Fenstersteuerung kann den VELUX-Modus auf ''manual'' setzen. Das Plugin unterstützt deshalb die Wiederaufnahme/Freigabe der VELUX-Automatik.
 
-\<code ->
+Befehl aus Loxone:
+
+<code>
 velux.cmd.velux_active.automation=1
+</code>
 
-Intern setzt das Plugin:
+Intern wird die vorhandene VELUX-Logik zur Freigabe der Automatik verwendet, unter anderem der Zustand:
 
-\<code ->
+<code>
 mode=algo_available
+</code>
 
-Bedeutung:
+Bedeutung wichtiger Textzustände:
 
-- ''manual'' = manueller Betrieb
-- ''algo_available'' = Automatik freigegeben
-- ''algo_active'' = Automatik greift aktuell aktiv ein
+  * ''manual'' = manueller Betrieb
+  * ''algo_available'' = Automatik ist freigegeben/verfügbar
+  * ''algo_active'' = VELUX-Automatik greift aktuell aktiv ein
 
-Der gleiche Befehl steht auch als Button auf der Seite **Steuerung** zur Verfügung.
+Diese Zustände sind Textwerte und müssen in Loxone entsprechend als Text ausgewertet bzw. per Befehlserkennung weiterverarbeitet werden.
 
-\===== Gateway Kopplung =====
+===== Loxone-Beispiele =====
 
-Für signierte AUF- und Positionsbefehle kann eine Gateway-Kopplung erforderlich sein.
+==== Virtueller UDP-Ausgang ====
 
-Nach erfolgreicher Kopplung zeigt die Statusseite:
+In Loxone Config einen virtuellen UDP-Ausgang mit der IP-Adresse des LoxBerry und dem konfigurierten Empfangsport anlegen.
 
-\<code ->
-Status: Verbunden
-Gateway Kopplung: Gekoppelt
+Beispiel Befehle bei EIN:
 
-Die Kopplungsdaten bleiben bei Updates erhalten.
+<code>
+velux.cmd.dachfenster_bad.open=1
+velux.cmd.dachfenster_bad.close=1
+velux.cmd.dachfenster_bad.stop=1
+</code>
 
-\===== Plugin Aktiv / Inaktiv =====
+Für eine Position kann beispielsweise gesendet werden:
 
-Bei **Inaktiv** werden automatische Abrufe und UDP-Steuerung gestoppt. Einstellungen und Kopplung bleiben erhalten.
+<code>
+velux.cmd.dachfenster_bad.position=50
+</code>
 
-\===== Scheduler =====
+Bei virtuellen UDP-Ausgängen **Verbindung nach Senden schließen** aktivieren.
 
-Der Scheduler prüft regelmäßig, ob ein neuer Abruf fällig ist.
+==== UDP-Eingang / Statuswerte ====
 
-Empfohlenes Abrufintervall:
+Für numerische Werte wird der jeweilige Wert hinter dem Gleichheitszeichen ausgewertet, beispielsweise:
 
-\<code ->
-3 Minuten
+<code>
+velux.module.dachfenster_bad.position=50
+</code>
 
-\===== Status =====
+Textzustände wie ''algo_active'' sollten in Loxone über passende Befehlserkennung/Textauswertung verarbeitet werden.
 
-Die Statusseite zeigt:
+===== Status =====
 
-- Verbindungsstatus
-- Gateway-Kopplungsstatus
-- Plugin Aktiv/Inaktiv
-- Letzter Abruf
-- Abrufintervall
-- Nächster Lauf
-- erkannte Geräte
+Die Statusseite unterscheidet verständlich zwischen:
 
-Die Version wird zentral aus ''plugin.cfg'' gelesen und nur im oberen VELUX-Balken angezeigt.
+  * Plugin aktiv/inaktiv
+  * API verbunden/nicht verbunden
+  * Gateway gekoppelt/nicht gekoppelt
+  * letzter erfolgreicher Abruf
+  * nächster geplanter Lauf
+  * letzter Steuerbefehl bzw. Steuerstatus, sofern vorhanden
+  * Fehlerzustand / Diagnose
+  * erkannte Geräte
 
-\===== Steuerung =====
+Die Plugin-Version wird zentral aus ''plugin.cfg'' gelesen. Es gibt keine hardcodierte Versionsnummer in CGI-Seiten.
 
-Unterstützt werden:
+===== Weboberfläche =====
 
-- AUF
-- STOP
-- ZU
-- Position
-- VELUX ACTIVE Automatisierung aktivieren
+Alle Buttons und Navigationselemente sind für normale, aktive, Hover-, Fokus- und deaktivierte Zustände mit expliziten Vorder-/Hintergrundfarben definiert.
 
-\===== Logging =====
+Störende geerbte ''text-shadow'', ''box-shadow'', Filter oder Hintergrundeffekte werden für kritische UI-Elemente neutralisiert, damit Titel und aktive Buttons lesbar bleiben.
 
-Das Log enthält Abrufe, Werte, UDP-Kommunikation, Steuerbefehle, Scheduler und Fehler.
+Die Oberfläche ist responsiv aufgebaut. Auf Smartphones werden breite Tabellen als einzelne Karten dargestellt, Formulare einspaltig angeordnet und Bedienelemente auf die verfügbare Breite angepasst. Die Einstellungen sind in VELUX-Konto, Abruf/Plugin, UDP-Statuswerte, UDP-Steuerung und Gateway-Kopplung gegliedert.
 
-Bei Neuinstallation wird das Hauptlog geleert. Bei Updates bleibt es erhalten.
+Unter **UDP Messages** werden UDP-Status, Heartbeat, Sendeverhalten, Ziel, Port, Präfix und die Anzahl aktivierter Werte angezeigt. Zusätzlich können alle erkannten Werte gemeinsam aktiviert oder deaktiviert werden.
 
-\===== Backup und Update =====
+===== Logging =====
 
-Bei Updates bleiben erhalten:
+Das Log enthält abhängig von der Aktion unter anderem:
 
-- VELUX Zugangsdaten
-- Loxone Miniserver
-- UDP-Sende- und Empfangseinstellungen
-- UDP-Auswahl
-- UDP-Namen
-- Heartbeat-Einstellungen
-- Gateway-Kopplung
-- Signierschlüssel
+  * API-Abrufe und Fehler
+  * Token-/Anmeldefehler
+  * erkannte Werte
+  * gesendete UDP-Telegramme inklusive vollständigem ''key=value'', Ziel-Miniserver und Port
+  * empfangene und validierte Steuerbefehle
+  * verworfene nicht erlaubte UDP-Absender
+  * Scheduler-/Worker-Läufe
+  * Listener-/Watchdog-Ereignisse
+  * Gateway-/Steuerfehler
 
-Zusätzlich wird ''config.json'' gesichert.
+Ein erfolgreicher Abruf aktualisiert den Zeitstempel des letzten erfolgreichen Laufs. Fehlgeschlagene Abrufe werden beim nächsten Scheduler-Lauf erneut versucht.
 
-Der UDP-Listener wird vor einem Update beendet und danach mit dem neuen Code neu gestartet.
+===== Scheduler und Listener =====
 
-\===== AutoUpdate =====
+Periodische Aufgaben laufen über:
 
-Stable:
+<code>
+cron.01min -> Scheduler -> Intervallprüfung -> Worker
+</code>
 
-\<code ->
-release.cfg
+Der Worker besitzt einen Lock gegen parallele Läufe.
 
-Pre-Release:
+Der UDP-Steuerungs-Listener läuft dauerhaft als Daemon. Ein Watchdog prüft den Listener und startet ihn bei Bedarf neu. Die PID-Datei wird erst nach erfolgreichem UDP-Port-Bind veröffentlicht.
 
-\<code ->
-prerelease.cfg
+Nach einem LoxBerry- oder Plugin-Neustart werden temporär noch nicht verfügbare Netzwerk-/API-/UDP-Ressourcen nicht als dauerhafter Erfolg behandelt. Der nächste Scheduler-/Watchdog-Lauf versucht erneut.
 
-\===== Fehlerbehebung =====
+===== Fehlerbehebung =====
 
-\==== UDP-Werte kommen nicht an ====
+==== API nicht verbunden ====
 
-- UDP-Ausgabe prüfen
-- Miniserver prüfen
-- UDP-Port prüfen
-- UDP Messages aktivieren
-- Firewall prüfen
-- Log prüfen
+  * Internet-/Netzwerkverbindung des LoxBerry prüfen
+  * VELUX-Zugangsdaten prüfen
+  * Log auf Token-/Loginfehler prüfen
+  * Datenabruf erneut auslösen
 
-\==== UDP-Steuerung funktioniert nicht ====
+==== Gateway nicht gekoppelt ====
 
-- UDP-Steuerung aktivieren
-- Empfangsport prüfen
-- Loxone Ausgang prüfen
-- Verbindung nach Senden schließen aktivieren
-- Log prüfen
+  * Gateway-Erreichbarkeit prüfen
+  * Kopplung erneut durchführen
+  * Log auf Signierungs-/Pairingfehler prüfen
 
-\==== Fenster bleibt auf manual ====
+==== UDP-Werte kommen nicht an ====
 
-\<code ->
+  * UDP-Ausgabe aktivieren
+  * richtigen Miniserver auswählen
+  * UDP-Sendeport prüfen
+  * gewünschte Werte unter **UDP Messages** aktivieren
+  * Firewall/Netzwerk prüfen
+  * Log prüfen
+
+==== UDP-Steuerung funktioniert nicht ====
+
+  * UDP-Steuerung aktivieren
+  * Empfangsport prüfen
+  * Miniserver als erlaubten Absender auswählen
+  * virtuellen UDP-Ausgang in Loxone prüfen
+  * **Verbindung nach Senden schließen** aktivieren
+  * Log prüfen
+
+==== Fenster bleibt auf manual ====
+
+Folgenden Befehl senden:
+
+<code>
 velux.cmd.velux_active.automation=1
+</code>
 
-senden.
+==== AUF oder Position schlägt fehl ====
 
-\==== AUF oder Position schlägt fehl ====
+  * prüfen, ob das Gerät den Befehl unterstützt
+  * Gateway-Kopplung prüfen
+  * Gateway-Erreichbarkeit prüfen
+  * Log auf API-/Signierungsfehler prüfen
 
-- Gateway-Kopplung prüfen
-- Gateway-Erreichbarkeit prüfen
-- Log prüfen
+===== Sicherheit =====
 
-\===== Sicherheit =====
+UDP besitzt keine eigene Verschlüsselung und sollte ausschließlich im lokalen vertrauenswürdigen Netzwerk verwendet werden.
 
-UDP besitzt keine eigene Authentifizierung. Der UDP-Port sollte nur im lokalen vertrauenswürdigen Netzwerk erreichbar sein.
+Der Listener prüft die Absender-IP gegen die konfigurierten erlaubten Miniserver. Nicht erlaubte Absender werden verworfen.
 
-\===== GitHub =====
+Tokens und Zugangsdaten werden in der Plugin-Konfiguration gehalten. Die automatische Token-Erneuerung nutzt bevorzugt den Refresh-Token. Credential-Felder werden defensiv verarbeitet, damit fehlende Werte nicht zu CGI-/HTTP-500-Fehlern führen.
+
+===== Backup und Update =====
+
+Bei Updates bleiben insbesondere erhalten:
+
+  * VELUX Zugangsdaten
+  * Access-/Refresh-Tokens
+  * Home-/Gateway-Zuordnung
+  * Gateway-Kopplungsinformationen und Signierschlüssel
+  * ausgewählter Loxone Miniserver
+  * UDP-Sende-/Empfangseinstellungen
+  * UDP-Auswahl und individuelle UDP-Namen
+  * Abrufintervall
+  * Pluginstatus
+  * Listener-/Absenderkonfiguration
+
+Vor einem Update wird der UDP-Listener sauber beendet. PID-Dateien des alten Prozesses werden nicht wiederverwendet. Nach dem Update startet der Watchdog den Listener mit dem neuen Code neu, sofern UDP-Steuerung aktiviert ist.
+
+Die aktuelle ''plugin.cfg'' des neuen Pakets wird nach dem Restore erneut übernommen, damit keine alte Versionsnummer aus einem Backup erhalten bleibt.
+
+===== AutoUpdate =====
+
+Stable-Kanal:
+
+<code>
+release.cfg
+</code>
+
+Pre-Release-Kanal:
+
+<code>
+prerelease.cfg
+</code>
+
+Für den offiziellen Stable-Stand 1.1.0 verweisen beide Dateien auf Release ''v1.1.0''.
+
+===== GitHub =====
 
 Repository:
 
-\<code ->
-https\://github.com/fuul1984/loxberry-plugin-velux-active-connect
+<code>
+https://github.com/fuul1984/loxberry-plugin-velux-active-connect
+</code>
 
 Releases:
 
-\<code ->
-https\://github.com/fuul1984/loxberry-plugin-velux-active-connect/releases
+<code>
+https://github.com/fuul1984/loxberry-plugin-velux-active-connect/releases
+</code>
 
-\===== Version =====
+===== Changelog =====
 
-Aktueller Stand: **1.0.0**
+==== 1.1.0 ====
 
-Status: **Stable**
+Großes Qualitäts-, Sicherheits-, Reboot- und WebUI-Update seit dem letzten offiziellen Stable-Release 1.0.0.
+
+  * responsive Weboberfläche für Desktop und Smartphone
+  * aufgeräumte Einstellungen und UDP-Messages-Seite
+  * verbesserte Statusdarstellung für Geräte und aktuelle Werte
+  * vollständiges UDP-TX-Logging
+  * Worker-Lock gegen parallele API-Läufe
+  * Prüfung erlaubter UDP-Absender
+  * robuster Listener/Watchdog und verbessertes Reboot-Verhalten
+  * gehärtete Token-/Credential-Recovery
+  * korrigierter Loxone-Export mit konfiguriertem Präfix und individuellen UDP-Namen
+  * zentrale Versionsanzeige ohne hardcodierten Fallback
+  * VELUX-Steuerung und Automatik-Wiederaufnahme erhalten
+  * README, AutoUpdate, GitHub-Release-Angaben und LoxWiki aktualisiert
+
+==== 1.0.0 ====
+
+Erster finaler Stable-Release mit Home-/Geräteerkennung, UDP-Rückmeldungen, Steuerung, Gateway-Kopplung, Scheduler, Logging und VELUX-Automatik.

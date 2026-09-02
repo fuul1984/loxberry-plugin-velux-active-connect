@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json, os, re, subprocess, sys, time, traceback
+import fcntl, json, os, re, subprocess, sys, time, traceback
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -10,7 +10,7 @@ LOG=Path(os.environ.get("LBPLOGDIR") or os.environ.get("LBPLOG") or f"/opt/loxbe
 DATA=Path(os.environ.get("LBPDATADIR") or os.environ.get("LBPDATA") or f"/opt/loxberry/data/plugins/{PLUGIN}")
 for p in (CFG,LOG,DATA): p.mkdir(parents=True, exist_ok=True)
 CONFIG=CFG/"config.json"; TOKENS=CFG/"tokens.json"; STATE=DATA/"state.json"; RUN=DATA/"last_run.json"; UDP_LAST=DATA/"udp_last_sent.json"
-RAW_HOMES=DATA/"raw_homesdata.json"; RAW_STATUS=DATA/"raw_homestatus.json"; LOGFILE=LOG/"veluxactive.log"
+RAW_HOMES=DATA/"raw_homesdata.json"; RAW_STATUS=DATA/"raw_homestatus.json"; LOGFILE=LOG/"veluxactive.log"; WORKER_LOCK=DATA/"worker.lock"
 
 def log(msg):
     line=time.strftime("%Y-%m-%d %H:%M:%S ")+str(msg)+"\n"
@@ -51,7 +51,10 @@ def ensure_token(cfg, force_login=False):
             return new, "refreshed"
         except Exception as e:
             log("Token refresh fehlgeschlagen: "+str(e))
-    new=login(cfg.get("email",""),cfg.get("password","")); save(TOKENS,new)
+    password=str(cfg.get("password","") or "")
+    if not password:
+        raise RuntimeError("Token-Erneuerung nicht möglich. Bitte VELUX-Passwort in den Einstellungen erneut eingeben.")
+    new=login(cfg.get("email",""),password); save(TOKENS,new)
     return new, "login"
 
 def extract_homes(raw):
@@ -194,6 +197,7 @@ def udp_path(value):
 
 def send_udp(cfg, values, heartbeat):
     if not cfg.get("udp_enabled"):
+        log("UDP TX übersprungen: UDP-Ausgabe ist deaktiviert")
         return 0
     msno=max(1,int(cfg.get("miniserver_no",1)))
     port=int(cfg.get("udp_port",7000))
@@ -230,6 +234,7 @@ def send_udp(cfg, values, heartbeat):
     if cfg.get("heartbeat_enabled",True):
         payload[udp_path(cfg.get("udp_heartbeat_key","heartbeat"))]=heartbeat
     if not payload:
+        log(f"UDP TX: keine Änderungen zu senden (Modus={mode})")
         return 0
     helper=Path(__file__).resolve().parent/"loxberry_bridge.pl"
     r=subprocess.run([str(helper),"send",str(msno),str(port),prefix], input=json.dumps(payload,ensure_ascii=False), capture_output=True,text=True,timeout=30)
@@ -239,6 +244,12 @@ def send_udp(cfg, values, heartbeat):
         # Update cache only after a successful send. First run (or cache deletion)
         # therefore sends every enabled value once as an initial synchronization.
         save(UDP_LAST,{"boot_id":boot_id,"values":current},0o600)
+    # Log the actual telegrams after a successful send. This makes it possible
+    # to verify in the plugin log exactly what was transmitted to Loxone.
+    for udp_key, udp_value in payload.items():
+        if isinstance(udp_value,bool):
+            udp_value="1" if udp_value else "0"
+        log(f"UDP TX -> MS#{msno}:{port} {prefix}.{udp_key}={udp_value}")
     log(f"UDP Modus={mode}, Nutzwerte={len([k for k in payload if k != udp_path(cfg.get('udp_heartbeat_key','heartbeat'))])}, Gesamt={len(payload)}")
     try:
         return int((r.stdout or "0").strip())
@@ -309,7 +320,14 @@ def main(force=False, force_login=False):
         except Exception as udp_e:
             state["udp_error"]=str(udp_e)
             log("UDP-WARNUNG: "+str(udp_e))
-        save(STATE,state,0o644); save(RUN,{"started_at":started,"timestamp":started,"finished_at":time.time(),"ok":True},0o644)
+        save(STATE,state,0o644)
+        if state.get("udp_error"):
+            # Cloud data is valid, but transport was not successful. Returning a
+            # failure keeps scheduler_last_success unchanged so cron retries next minute.
+            save(RUN,{"started_at":started,"timestamp":started,"finished_at":time.time(),"ok":False,"api_ok":True,"udp_ok":False},0o644)
+            log(f"Abruf API OK, UDP FEHLER: erneuter Versuch beim nächsten Scheduler-Lauf")
+            return 2
+        save(RUN,{"started_at":started,"timestamp":started,"finished_at":time.time(),"ok":True,"api_ok":True,"udp_ok":True},0o644)
         log(f"Abruf OK: {len(state['homes'])} Home(s), {len(state['devices'])} Gerät(e), {len(state['values'])} Wert(e), UDP={state['udp_messages']}")
         return 0
     except Exception as e:
@@ -328,5 +346,22 @@ def main(force=False, force_login=False):
         sys.stderr.write(err+"\n")
         return 1
 
+def locked_main():
+    # Protect all entry paths (scheduler, CGI/manual run) from overlapping API work.
+    # A busy lock is a temporary failure so the scheduler will retry next minute
+    # instead of incorrectly advancing its last-success timestamp.
+    lockfh=WORKER_LOCK.open("a+")
+    try:
+        fcntl.flock(lockfh.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("Worker bereits aktiv - paralleler Lauf abgewiesen")
+        return 75
+    try:
+        return main("--force" in sys.argv, "--force-login" in sys.argv)
+    finally:
+        try: fcntl.flock(lockfh.fileno(),fcntl.LOCK_UN)
+        except Exception: pass
+        lockfh.close()
+
 if __name__=="__main__":
-    raise SystemExit(main("--force" in sys.argv, "--force-login" in sys.argv))
+    raise SystemExit(locked_main())

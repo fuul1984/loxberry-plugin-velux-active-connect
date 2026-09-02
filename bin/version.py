@@ -33,6 +33,6 @@ def plugin_version() -> str:
         if version:
             return version
 
-    # Final fallback: LoxBerry plugin.cfg may not be copied into runtime directories.
-    # Keep UI readable instead of showing "unknown".
-    return "0.9.0"
+    # Never hardcode a release number here. If the central metadata cannot be
+    # resolved, show an explicit neutral value instead of a stale version.
+    return "unbekannt"

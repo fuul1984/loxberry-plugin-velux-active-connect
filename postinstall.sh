@@ -7,6 +7,15 @@ DATA="$LBROOT/data/plugins/$PLUGIN_FOLDER"
 LOG="$LBROOT/log/plugins/$PLUGIN_FOLDER"
 TEMPLATE="$LBROOT/templates/plugins/$PLUGIN_FOLDER/default.json"
 mkdir -p "$CFG" "$DATA" "$LOG"
+
+# Keep the package plugin.cfg as the central runtime version source.
+# $6 is the full temporary plugin path supplied by the LoxBerry installer.
+PTEMPPATH="${6:-}"
+if [ -n "$PTEMPPATH" ] && [ -f "$PTEMPPATH/plugin.cfg" ]; then
+    cp -f "$PTEMPPATH/plugin.cfg" "$CFG/plugin.cfg"
+    chown loxberry:loxberry "$CFG/plugin.cfg" 2>/dev/null || true
+    chmod 644 "$CFG/plugin.cfg" 2>/dev/null || true
+fi
 if [ ! -f "$CFG/config.json" ]; then
     if [ -f "$TEMPLATE" ]; then
         cp "$TEMPLATE" "$CFG/config.json"

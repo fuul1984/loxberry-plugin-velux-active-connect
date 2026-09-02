@@ -48,24 +48,30 @@ def write(name,text):
 def build():
     cfg=load(CONFIG,{})
     state=load(STATE,{})
-    udp=cfg.get("udp",{}) if isinstance(cfg.get("udp"),dict) else {}
     ctl=cfg.get("control",{}) if isinstance(cfg.get("control"),dict) else {}
 
-    prefix=str(udp.get("prefix","velux") or "velux").strip(".")
+    # UDP settings are stored flat in config.json. Respect the exact configured
+    # prefix and per-value UDP names used by worker.py.
+    prefix=str(cfg.get("udp_prefix","velux") or "velux").strip(".")
     listen_port=int(ctl.get("udp_listen_port",7001))
     cmd_prefix=str(ctl.get("command_prefix","velux.cmd") or "velux.cmd").strip(".")
     loxberry_ip=detect_local_ip()
     udp_address=f"/dev/udp/{loxberry_ip}/{listen_port}"
-    # status messages already know exact keys
+    # Build the same enabled/name mapping as worker.py so exports match the
+    # messages actually sent to Loxone.
     messages=[]
-    for key,item in sorted((state.get("udp_registry") or {}).items()):
-        if not isinstance(item,dict): continue
-        if item.get("enabled") is False: continue
-        udp_name=item.get("udp_name") or key
+    rules=cfg.get("udp_messages",{}) if isinstance(cfg.get("udp_messages"),dict) else {}
+    auto_new=bool(cfg.get("udp_auto_new",True))
+    meta=state.get("value_meta",{}) if isinstance(state.get("value_meta"),dict) else {}
+    for key,val in sorted((state.get("values") or {}).items()):
+        rule=rules.get(key)
+        enabled=auto_new if not isinstance(rule,dict) else bool(rule.get("enabled",True))
+        if not enabled:
+            continue
+        udp_name=key if not isinstance(rule,dict) else (rule.get("name") or key)
+        item=dict(meta.get(key,{}) if isinstance(meta.get(key,{}),dict) else {})
+        item.setdefault("label",key)
         messages.append((udp_name,key,item))
-    if not messages:
-        for key,val in sorted((state.get("values") or {}).items()):
-            messages.append((key,key,{"label":key}))
 
     devices=[d for d in state.get("devices",[]) if d.get("role")=="Aktor"]
 

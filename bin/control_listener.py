@@ -15,9 +15,12 @@ CONTROL_STATE=DATA/"control_state.json"; RX_STATE=DATA/"control_rx.json"; PIDFIL
 def load(p,d):
     try:return json.loads(p.read_text(encoding="utf-8"))
     except Exception:return d
-def save(p,o):
+def save(p,o,mode=0o600):
     p.parent.mkdir(parents=True,exist_ok=True)
-    t=p.with_suffix(p.suffix+".tmp"); t.write_text(json.dumps(o,indent=2,ensure_ascii=False),encoding="utf-8"); t.replace(p)
+    t=p.with_suffix(p.suffix+".tmp")
+    t.write_text(json.dumps(o,indent=2,ensure_ascii=False),encoding="utf-8")
+    os.chmod(t,mode)
+    t.replace(p)
 def log(m):
     try:
         LOG.mkdir(parents=True,exist_ok=True)
@@ -30,7 +33,11 @@ def token(cfg):
         try:
             n=refresh(t["refresh_token"]); n.setdefault("refresh_token",t["refresh_token"]); save(TOKENS,n); return n
         except Exception as e:log("CONTROL Token refresh fehlgeschlagen: "+str(e))
-    n=login(cfg.get("email",""),cfg.get("password","")); save(TOKENS,n); return n
+    password=str(cfg.get("password","") or "")
+    if not password:
+        raise RuntimeError("Token-Erneuerung nicht möglich. Bitte VELUX-Passwort in den Einstellungen erneut eingeben.")
+    n=login(cfg.get("email",""),password); save(TOKENS,n)
+    return n
 
 def parse_message(text,prefix):
     text=text.strip().strip("\x00")
@@ -136,9 +143,11 @@ def main():
     c=cfg.get("control",{}) if isinstance(cfg.get("control"),dict) else {}
     if not bool(cfg.get("plugin_enabled", True)) or not c.get("enabled"): return 0
     port=int(c.get("udp_listen_port",7001)); prefix=str(c.get("command_prefix","velux.cmd") or "velux.cmd")
-    DATA.mkdir(parents=True,exist_ok=True); PIDFILE.write_text(str(os.getpid()))
+    DATA.mkdir(parents=True,exist_ok=True)
     sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
     sock.bind(("0.0.0.0",port)); sock.settimeout(15)
+    # Publish the PID only after the UDP socket is successfully bound.
+    PIDFILE.write_text(str(os.getpid()),encoding="utf-8")
     log(f"CONTROL Listener gestartet: UDP {port}, Präfix={prefix}")
     try:
         while True:
@@ -148,7 +157,16 @@ def main():
             try:data,addr=sock.recvfrom(4096)
             except socket.timeout:continue
             text=data.decode("utf-8","replace").strip()
-            rx={"timestamp":int(time.time()),"source_ip":addr[0],"source_port":addr[1],"text":text,"parsed":False}
+            allowed=c.get("allowed_senders",[]) if isinstance(c.get("allowed_senders",[]),list) else []
+            allowed=[str(x).strip() for x in allowed if str(x).strip()]
+            # Localhost is always allowed for the built-in self-test. Network commands
+            # are accepted only from explicitly selected Miniserver addresses.
+            if addr[0] not in ("127.0.0.1","::1") and (not allowed or addr[0] not in allowed):
+                rx={"timestamp":int(time.time()),"source_ip":addr[0],"source_port":addr[1],"text":text,"parsed":False,"rejected":True}
+                save(RX_STATE,rx)
+                log(f"CONTROL UDP ABGELEHNT {addr[0]}:{addr[1]}: Absender nicht erlaubt")
+                continue
+            rx={"timestamp":int(time.time()),"source_ip":addr[0],"source_port":addr[1],"text":text,"parsed":False,"rejected":False}
             save(RX_STATE,rx)
             log(f"CONTROL UDP RAW {addr[0]}:{addr[1]}: {text}")
             parsed=parse_message(text,prefix)

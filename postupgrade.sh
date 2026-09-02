@@ -14,6 +14,17 @@ for area in config data log; do
     fi
 done
 
+# Refresh the central plugin metadata after restoring persistent configuration.
+# This prevents an older backed-up plugin.cfg from surviving an update.
+PTEMPPATH="${6:-}"
+CFGDIR="$LBROOT/config/plugins/$PLUGIN_FOLDER"
+if [ -n "$PTEMPPATH" ] && [ -f "$PTEMPPATH/plugin.cfg" ]; then
+    mkdir -p "$CFGDIR"
+    cp -f "$PTEMPPATH/plugin.cfg" "$CFGDIR/plugin.cfg"
+    chown loxberry:loxberry "$CFGDIR/plugin.cfg" 2>/dev/null || true
+    chmod 644 "$CFGDIR/plugin.cfg" 2>/dev/null || true
+fi
+
 # Fallback: restore the explicit config.json safety copy if the regular
 # config-area restore did not produce a configuration file.
 if [ ! -f "$LBROOT/config/plugins/$PLUGIN_FOLDER/config.json" ] && [ -f "$BACKUP/config.json" ]; then
@@ -50,6 +61,40 @@ chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/velux_scheduler.py" 2>/dev/null || 
 "$LBROOT/bin/plugins/$PLUGIN_FOLDER/install_dependencies.sh" "$@" || true
 
 chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_listener.py"          "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh"          "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_cli.py" 2>/dev/null || true
+
+
+# 1.0.1 migration: if UDP control was already enabled, initialize the allowed
+# sender list from the Miniserver selected in the existing LoxBerry configuration.
+# An empty explicit list remains fail-closed if no Miniserver can be resolved.
+CFGFILE="$LBROOT/config/plugins/$PLUGIN_FOLDER/config.json"
+BRIDGE="$LBROOT/bin/plugins/$PLUGIN_FOLDER/loxberry_bridge.pl"
+if [ -f "$CFGFILE" ] && [ -x "$BRIDGE" ]; then
+    MSJSON="$($BRIDGE list 2>/dev/null || true)"
+    python3 - "$CFGFILE" "$MSJSON" <<'PYMIG' || true
+import json,os,sys
+p=sys.argv[1]
+try:
+    cfg=json.load(open(p,encoding="utf-8"))
+    control=cfg.get("control") if isinstance(cfg.get("control"),dict) else {}
+    if "allowed_senders" not in control:
+        raw=json.loads(sys.argv[2] or "[]")
+        if isinstance(raw,dict): raw=[raw]
+        wanted=int(cfg.get("miniserver_no",1) or 1)
+        ips=[]
+        for i,ms in enumerate(raw if isinstance(raw,list) else [],1):
+            if not isinstance(ms,dict): continue
+            no=int(ms.get("_msno",i) or i)
+            ip=str(ms.get("IPAddress") or ms.get("ipaddress") or ms.get("IP") or ms.get("ip") or "").strip()
+            if no==wanted and ip: ips.append(ip)
+        control["allowed_senders"]=sorted(set(ips))
+        cfg["control"]=control
+        tmp=p+".tmp"
+        with open(tmp,"w",encoding="utf-8") as f: json.dump(cfg,f,indent=2,ensure_ascii=False)
+        os.chmod(tmp,0o600); os.replace(tmp,p)
+except Exception:
+    pass
+PYMIG
+fi
 
 # PID-Datei aus dem Backup darf nie weiterverwendet werden:
 # der alte Listener-Prozess wurde vor dem Upgrade beendet.
