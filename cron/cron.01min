@@ -1,7 +1,11 @@
 #!/bin/bash
 # VELUX Active Connect Scheduler
+# Logpflege: täglicher Reset um 00:00 und harte Größenbegrenzung.
+/usr/bin/python3 /opt/loxberry/bin/plugins/veluxactive/log_maintenance.py >/dev/null 2>&1
+
 # UDP-Steuerungslistener starten/überwachen.
 /opt/loxberry/bin/plugins/veluxactive/control_watchdog.sh >/dev/null 2>&1
+/opt/loxberry/bin/plugins/veluxactive/event_watchdog.sh >/dev/null 2>&1
 
 /usr/bin/python3 \
   /opt/loxberry/bin/plugins/veluxactive/velux_scheduler.py \

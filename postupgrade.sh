@@ -57,8 +57,12 @@ fi
 
 chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/velux_scheduler.py" 2>/dev/null || true
 
-# Dependency for signed VELUX gateway control
+# Dependencies for signed VELUX gateway control. Do not rely on ZIP file modes.
+chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/install_dependencies.sh" 2>/dev/null || true
 "$LBROOT/bin/plugins/$PLUGIN_FOLDER/install_dependencies.sh" "$@" || true
+# Optional local HAP eventstream dependency
+python3 -c "import homekit" >/dev/null 2>&1 || (python3 -m pip install --break-system-packages "homekit[IP]" || python3 -m pip install "homekit[IP]" || true)
+chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_setup.py" "$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_listener.py" "$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_watchdog.sh" 2>/dev/null || true
 
 chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_listener.py"          "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh"          "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_cli.py" 2>/dev/null || true
 
@@ -96,11 +100,13 @@ except Exception:
 PYMIG
 fi
 
-# PID-Datei aus dem Backup darf nie weiterverwendet werden:
-# der alte Listener-Prozess wurde vor dem Upgrade beendet.
-rm -f "$LBROOT/data/plugins/$PLUGIN_FOLDER/control_listener.pid"
+# PID-Dateien aus dem Backup dürfen nie weiterverwendet werden:
+# beide Daemons wurden vor dem Upgrade beendet und müssen mit dem neuen Code starten.
+rm -f "$LBROOT/data/plugins/$PLUGIN_FOLDER/control_listener.pid" \
+      "$LBROOT/data/plugins/$PLUGIN_FOLDER/event_listener.pid"
 
-# Listener mit dem NEU installierten Code neu starten, falls UDP-Steuerung aktiviert ist.
+# Listener mit dem NEU installierten Code neu starten, falls aktiviert.
 "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh" >/dev/null 2>&1 || true
+"$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_watchdog.sh" >/dev/null 2>&1 || true
 
 exit 0

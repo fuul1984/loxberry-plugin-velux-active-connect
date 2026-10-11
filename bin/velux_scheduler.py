@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from logutil import log
 
 PLUGIN="veluxactive"
 LBROOT=Path(os.environ.get("LBHOMEDIR","/opt/loxberry"))
@@ -18,10 +19,6 @@ LOCK=DATA/"scheduler.lock"
 
 DATA.mkdir(parents=True,exist_ok=True)
 LOG.mkdir(parents=True,exist_ok=True)
-
-def log(msg):
-    with (LOG/"veluxactive.log").open("a",encoding="utf-8") as f:
-        f.write(time.strftime("%Y-%m-%d %H:%M:%S")+" "+msg+"\n")
 
 try:
     lockfh=LOCK.open("a+")
@@ -39,7 +36,7 @@ if not bool(cfg.get("plugin_enabled", True)):
     raise SystemExit(0)
 
 try:
-    interval=int(cfg.get("poll_interval_minutes",5))
+    interval=int(cfg.get("poll_interval_minutes",3))
 except Exception:
     interval=5
 if interval < 1 or interval > 1440:

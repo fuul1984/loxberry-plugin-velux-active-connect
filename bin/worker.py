@@ -2,6 +2,7 @@
 from __future__ import annotations
 import fcntl, json, os, re, subprocess, sys, time, traceback
 from pathlib import Path
+from logutil import log
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 PLUGIN="veluxactive"
@@ -10,21 +11,8 @@ LOG=Path(os.environ.get("LBPLOGDIR") or os.environ.get("LBPLOG") or f"/opt/loxbe
 DATA=Path(os.environ.get("LBPDATADIR") or os.environ.get("LBPDATA") or f"/opt/loxberry/data/plugins/{PLUGIN}")
 for p in (CFG,LOG,DATA): p.mkdir(parents=True, exist_ok=True)
 CONFIG=CFG/"config.json"; TOKENS=CFG/"tokens.json"; STATE=DATA/"state.json"; RUN=DATA/"last_run.json"; UDP_LAST=DATA/"udp_last_sent.json"
-RAW_HOMES=DATA/"raw_homesdata.json"; RAW_STATUS=DATA/"raw_homestatus.json"; LOGFILE=LOG/"veluxactive.log"; WORKER_LOCK=DATA/"worker.lock"
-
-def log(msg):
-    line=time.strftime("%Y-%m-%d %H:%M:%S ")+str(msg)+"\n"
-    try:
-        LOG.mkdir(parents=True, exist_ok=True)
-        with LOGFILE.open("a",encoding="utf-8") as f:
-            f.write(line)
-        return True
-    except Exception:
-        try:
-            sys.stderr.write("LOGGING FEHLER: "+line)
-        except Exception:
-            pass
-        return False
+RAW_HOMES=DATA/"raw_homesdata.json"; RAW_STATUS=DATA/"raw_homestatus.json"; LOGFILE=LOG/"veluxactive.log"; WORKER_LOCK=DATA/"worker.lock"; API_LOCK=DATA/"api.lock"; HEARTBEAT_STATE=DATA/"heartbeat_state.json"
+LOCAL_VALUES=DATA/"local_values.json"
 
 def load(path, default):
     try: return json.loads(path.read_text(encoding="utf-8"))
@@ -43,7 +31,7 @@ def ensure_token(cfg, force_login=False):
     tok=load(TOKENS,{})
     if force_login:
         tok={}
-    if tok.get("access_token") and int(tok.get("expires_at",0)) > time.time()+120:
+    if tok.get("access_token") and int(tok.get("expires_at",0)) > time.time()+1800:
         return tok, "cached"
     if tok.get("refresh_token"):
         try:
@@ -149,9 +137,28 @@ def flatten(raw, status_by_home):
                 "id":mid,"name":mlabel,"type":dtype,"home_id":hid,"bridge":module.get("bridge",""),
                 "room_id":rid,"room_name":room_label,"udp_key":mname,"role":role,
             }
-            for key in ("reachable","battery_percent","battery_level","battery_state","rf_strength","rf_state","last_seen","firmware","firmware_revision","current_position","target_position","position","mode","is_raining","rain","rain_detected","raining"):
+            for key in ("reachable","battery_percent","battery_level","battery_state","rf_strength","rf_state","last_seen","firmware","firmware_revision","current_position","target_position","position","mode","velux_type","rain_position","secure_position","is_raining","rain","rain_detected","raining"):
                 if module.get(key) is not None:
                     device[key]=module[key]
+            # v1.1.10: retain non-secret gateway state needed to compare successful
+            # and rejected signed window commands. Pairing payloads can contain
+            # sensitive material, so never persist their contents: only a safe
+            # presence/state summary is kept.
+            if dtype == "NXG":
+                for key in ("secure","busy","locked","locking","last_reset_type","calibrating","wifi_state","wifi_strength"):
+                    if module.get(key) is not None:
+                        device[key]=module[key]
+                pairing=module.get("pairing")
+                if pairing is None:
+                    device["pairing_state"]="missing"
+                elif isinstance(pairing,bool):
+                    device["pairing_state"]="true" if pairing else "false"
+                elif isinstance(pairing,(dict,list,tuple)):
+                    device["pairing_state"]="present" if len(pairing) else "empty"
+                elif isinstance(pairing,str):
+                    device["pairing_state"]="present" if pairing.strip() else "empty"
+                else:
+                    device["pairing_state"]="present"
             # Rain status is exposed as `is_raining` by the current VELUX/pyatmo
             # implementation. Accept a few raw aliases as well and dashboard_data
             # for forward/backward compatibility with VELUX payload changes.
@@ -191,9 +198,46 @@ def flatten(raw, status_by_home):
                 add_value(f"module.{mname}.position", position, f"{mlabel} – Position", "%", "Position", source)
     return result
 
+
+def apply_local_first(state, cfg):
+    """Overlay fresh HAP/Eventstream values on cloud state without deleting cloud fallback data."""
+    ev=cfg.get('eventstream',{}) if isinstance(cfg.get('eventstream',{}),dict) else {}
+    if not ev.get('enabled',False): return state
+    local=load(LOCAL_VALUES,{})
+    entries=local.get('values',{}) if isinstance(local,dict) and isinstance(local.get('values'),dict) else {}
+    now=time.time(); used=[]
+    for key,entry in entries.items():
+        if not isinstance(entry,dict) or key not in state.get('values',{}): continue
+        ts=float(entry.get('timestamp',0) or 0)
+        # Eventstream is authoritative while connected/recent. A generous window
+        # survives quiet sensors between cloud synchronisations without making stale
+        # data permanent if the local listener disappears.
+        if ts <= 0 or now-ts > 1800: continue
+        state['values'][key]=entry.get('value')
+        meta=state.get('value_meta',{}).get(key)
+        if isinstance(meta,dict):
+            meta['source']='EVENTSTREAM (lokal)'
+            meta['transport_source']='EVENTSTREAM'
+            meta['local_characteristic']=entry.get('characteristic','')
+        used.append(key)
+    if used: log('LOCAL FIRST -> '+str(len(used))+' Cloud-Wert(e) durch aktuelle Eventstream-Werte ersetzt: '+', '.join(sorted(used)))
+    return state
+
 def udp_path(value):
     parts=[slug(x) for x in str(value).split(".") if str(x).strip()]
     return ".".join(parts) or "value"
+
+def udp_value(key, value):
+    # Keep the original VELUX text mode in state.json/dashboard, but expose the
+    # window automation state numerically on UDP so Loxone can evaluate it
+    # directly without text parsing. Unknown/future modes remain unchanged.
+    if str(key).startswith("module.") and str(key).endswith(".mode"):
+        return {
+            "algo_disabled": 0,
+            "algo_available": 1,
+            "algo_active": 2,
+        }.get(str(value), value)
+    return value
 
 def send_udp(cfg, values, heartbeat):
     if not cfg.get("udp_enabled"):
@@ -220,6 +264,7 @@ def send_udp(cfg, values, heartbeat):
     current={}
     payload={}
     for key,value in values.items():
+        value=udp_value(key, value)
         rule=rules.get(key)
         enabled=auto_new if not isinstance(rule,dict) else bool(rule.get("enabled",True))
         if not enabled:
@@ -246,15 +291,61 @@ def send_udp(cfg, values, heartbeat):
         save(UDP_LAST,{"boot_id":boot_id,"values":current},0o600)
     # Log the actual telegrams after a successful send. This makes it possible
     # to verify in the plugin log exactly what was transmitted to Loxone.
-    for udp_key, udp_value in payload.items():
-        if isinstance(udp_value,bool):
-            udp_value="1" if udp_value else "0"
-        log(f"UDP TX -> MS#{msno}:{port} {prefix}.{udp_key}={udp_value}")
+    for udp_key, udp_val in payload.items():
+        if isinstance(udp_val,bool):
+            udp_val="1" if udp_val else "0"
+        log(f"UDP TX -> MS#{msno}:{port} {prefix}.{udp_key}={udp_val}")
     log(f"UDP Modus={mode}, Nutzwerte={len([k for k in payload if k != udp_path(cfg.get('udp_heartbeat_key','heartbeat'))])}, Gesamt={len(payload)}")
     try:
         return int((r.stdout or "0").strip())
     except ValueError:
         return len(payload)
+
+def heartbeat_threshold(cfg):
+    try:
+        return max(1, min(20, int(cfg.get("heartbeat_error_threshold", 3))))
+    except (TypeError, ValueError):
+        return 3
+
+def is_transient_cloud_error(exc):
+    """Only short-lived cloud/network failures are tolerated for heartbeat purposes."""
+    text=f"{type(exc).__name__}: {exc}".lower()
+    transient_markers=(
+        "zeitüberschreitung", "timeout", "timed out", "netzwerkfehler",
+        "connection reset", "connection refused", "temporary failure",
+        "temporär", "temporar", "http 429",
+        "http 500", "http 502", "http 503", "http 504",
+    )
+    return any(marker in text for marker in transient_markers)
+
+def heartbeat_on_success():
+    hb=load(HEARTBEAT_STATE,{})
+    previous=int(hb.get("consecutive_transient_errors",0) or 0)
+    if previous:
+        log(f"Heartbeat: Cloud wieder OK - Fehlerzähler {previous} -> 0")
+    save(HEARTBEAT_STATE,{"consecutive_transient_errors":0,"last_success":int(time.time()),"last_error":""},0o600)
+
+def heartbeat_on_error(cfg, exc):
+    threshold=heartbeat_threshold(cfg)
+    transient=is_transient_cloud_error(exc)
+    hb=load(HEARTBEAT_STATE,{})
+    previous=int(hb.get("consecutive_transient_errors",0) or 0)
+    count=previous+1 if transient else threshold
+    send_value=0 if count >= threshold else 1
+    save(HEARTBEAT_STATE,{
+        "consecutive_transient_errors":count,
+        "threshold":threshold,
+        "transient":transient,
+        "last_error":f"{type(exc).__name__}: {exc}",
+        "last_error_at":int(time.time()),
+    },0o600)
+    if transient and send_value == 1:
+        log(f"Heartbeat: temporärer Cloud-Fehler {count}/{threshold} - Heartbeat bleibt 1")
+    elif transient:
+        log(f"Heartbeat: temporärer Cloud-Fehler {count}/{threshold} - Schwelle erreicht, Heartbeat=0")
+    else:
+        log("Heartbeat: nicht-temporärer Auth-/Konfig-/API-Fehler - Heartbeat=0")
+    return send_value, count, threshold, transient
 
 def main(force=False, force_login=False):
     # Automatic cadence is controlled by velux_scheduler.py. The scheduler calls
@@ -264,7 +355,7 @@ def main(force=False, force_login=False):
         log("Plugin ist inaktiv - Abruf übersprungen")
         return 0
     last=load(RUN,{})
-    interval=max(1,int(cfg.get("poll_interval_minutes",5)))
+    interval=max(1,int(cfg.get("poll_interval_minutes",3)))
     now=time.time()
     last_started=float(last.get("started_at", last.get("timestamp",0)) or 0)
     next_due=last_started + interval*60 if last_started > 0 else 0
@@ -296,21 +387,35 @@ def main(force=False, force_login=False):
                 log(f"homestatus FEHLER {home.get('name',hid)}: {e}")
         save(RAW_STATUS,statuses,0o600)
         state=flatten(raw,statuses)
-        # Diagnostic visibility: log raw room/module keys plus every normalized
-        # value that the plugin exposes. This intentionally excludes credentials/tokens.
-        for hid,status in statuses.items():
-            home_raw=((status.get("body") or {}).get("home") or {}) if isinstance(status,dict) else {}
-            for room in (home_raw.get("rooms") or []):
-                if isinstance(room,dict):
-                    log(f"RAW Raum {room.get('name') or room.get('id','?')}: Felder={','.join(sorted(map(str,room.keys())))}")
-            for module in (home_raw.get("modules") or []):
-                if isinstance(module,dict):
-                    log(f"RAW Modul {module.get('module_name') or module.get('name') or module.get('id','?')}: Typ={module.get('type','?')}, Felder={','.join(sorted(map(str,module.keys())))}")
-        for key in sorted(state.get("values",{})):
-            meta=state.get("value_meta",{}).get(key,{})
-            unit=meta.get("unit","")
-            log(f"WERT {key}={state['values'][key]}{(' '+unit) if unit else ''}")
-        state.update({"ok":True,"timestamp":int(time.time()),"duration_ms":int((time.time()-started)*1000),"error":"","token_source":token_source})
+        state=apply_local_first(state,cfg)
+        value_count=len(state.get("values",{}))
+        device_count=len(state.get("devices",[]))
+        if value_count < 10 or device_count < 2:
+            status_summary=[]
+            for hid,status in statuses.items():
+                body=(status.get("body") or {}) if isinstance(status,dict) else {}
+                home=(body.get("home") or {}) if isinstance(body,dict) else {}
+                status_summary.append(f"home={hid}:modules={len(home.get('modules') or [])},rooms={len(home.get('rooms') or [])},error={'ja' if bool(status.get('error')) else 'nein'}")
+            log(f"KIG300 DIAG: UNVOLLSTAENDIGER ABRUF devices={device_count}, values={value_count}; " + "; ".join(status_summary))
+
+        # Never replace a previously complete actor/state snapshot with a sudden,
+        # clearly incomplete cloud response. This was observed on KIG 300 as
+        # 9 devices / 49 values -> 9 devices / 1 value and made the WebUI/control
+        # path temporarily forget every actuator until the next complete fetch.
+        previous=load(STATE,{})
+        prev_devices=len(previous.get("devices",[])) if isinstance(previous.get("devices"),list) else 0
+        prev_values=len(previous.get("values",{})) if isinstance(previous.get("values"),dict) else 0
+        sudden_value_drop=prev_values >= 10 and value_count < max(2, prev_values // 2)
+        sudden_device_drop=prev_devices >= 2 and device_count < max(1, prev_devices // 2)
+        if previous.get("ok") is True and (sudden_value_drop or sudden_device_drop):
+            reason=(f"unvollständiger VELUX-Abruf verworfen: vorher {prev_devices} Geräte/{prev_values} Werte, "
+                    f"jetzt {device_count} Geräte/{value_count} Werte")
+            log("KIG300 SCHUTZ: "+reason+"; letzte vollständige state.json bleibt erhalten")
+            save(RUN,{"started_at":started,"timestamp":started,"finished_at":time.time(),"ok":False,"api_ok":False,"partial_data":True,"error":reason},0o644)
+            return 3
+        # Verbose RAW/WERT diagnostics are intentionally suppressed in normal operation.
+        heartbeat_on_success()
+        state.update({"ok":True,"timestamp":int(time.time()),"duration_ms":int((time.time()-started)*1000),"error":"","token_source":token_source,"heartbeat_error_count":0,"heartbeat_error_threshold":heartbeat_threshold(cfg)})
         # VELUX cloud retrieval and UDP transport are intentionally separated:
         # a Miniserver/UDP problem must not discard otherwise valid VELUX data.
         state["udp_messages"]=0
@@ -335,9 +440,10 @@ def main(force=False, force_login=False):
         tb=traceback.format_exc()
         log("FEHLER: "+err)
         log(tb.rstrip())
-        try: send_udp(cfg,{},0)
+        heartbeat_value, hb_count, hb_threshold, hb_transient=heartbeat_on_error(cfg,e)
+        try: send_udp(cfg,{},heartbeat_value)
         except Exception as udp_e: log("Heartbeat-Fehler: "+str(udp_e))
-        state_err={"ok":False,"timestamp":int(time.time()),"duration_ms":int((time.time()-started)*1000),"error":err,"traceback":tb,"homes":[],"devices":[],"values":{}}
+        state_err={"ok":False,"timestamp":int(time.time()),"duration_ms":int((time.time()-started)*1000),"error":err,"traceback":tb,"homes":[],"devices":[],"values":{},"heartbeat_error_count":hb_count,"heartbeat_error_threshold":hb_threshold,"heartbeat_error_transient":hb_transient,"heartbeat_value":heartbeat_value}
         try: save(STATE,state_err,0o644)
         except Exception as state_e:
             sys.stderr.write(f"STATE SCHREIBFEHLER: {state_e}\n{tb}\n")
@@ -356,9 +462,18 @@ def locked_main():
     except BlockingIOError:
         log("Worker bereits aktiv - paralleler Lauf abgewiesen")
         return 75
+    apifh=API_LOCK.open("a+")
     try:
+        try:
+            fcntl.flock(apifh.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("KIG300 API-SCHUTZ: Steuerung/API-Zugriff aktiv - Worker wird auf den nächsten Lauf verschoben")
+            return 75
         return main("--force" in sys.argv, "--force-login" in sys.argv)
     finally:
+        try: fcntl.flock(apifh.fileno(),fcntl.LOCK_UN)
+        except Exception: pass
+        apifh.close()
         try: fcntl.flock(lockfh.fileno(),fcntl.LOCK_UN)
         except Exception: pass
         lockfh.close()

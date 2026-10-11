@@ -1,7 +1,19 @@
 ====== VELUX Active Connect ======
 
+
+===== Neu in Version 1.5.0 =====
+
+  * Lokale HomeKit/HAP-Verbindung für KIX300 und KIG300 als Ergänzung zur VELUX Cloud.
+  * Eventstream: Temperatur, Luftfeuchtigkeit, CO₂ und Position werden bei Änderungen direkt an Loxone weitergeleitet, sofern ausgewählt.
+  * Lokale Steuerung von AUF, ZU und Position 0–100, sofern vom Gerät unterstützt; automatischer Cloud-Fallback.
+  * Automatische Gerätezuordnung für mehrere Fenster und Rollläden, inklusive Korrektur fehlerhafter Zuordnungen.
+  * STOP, Regenstatus und VELUX-Automatik bleiben abhängig vom Cloud-Weg.
+  * Einstellungen sind in VELUX Cloud (inklusive signierter Gateway-Kopplung), lokale VELUX-Verbindung, VELUX → Loxone und Loxone → VELUX gegliedert.
+  * HAP-Pairing benötigt die Gateway-IP, den HAP-Port (normalerweise 5001) und den HomeKit-Code nur bei der Kopplung; der Setup-Code wird nicht gespeichert.
+  * UDP-Statusnamen und Steuerbefehle bleiben kompatibel.
+
 **Status:** Stable  
-**Version:** 1.1.0  
+**Version:** 1.5.0  
 **Minimum LoxBerry:** 4.0.0
 
 Version 1.1.0 bündelt die seit dem letzten offiziellen Stable-Release 1.0.0 vorgenommenen Verbesserungen an Sicherheit, Reboot-Robustheit, UDP, Logging und responsiver Weboberfläche.
@@ -51,7 +63,7 @@ Die CGI-Seiten dienen der Oberfläche und interaktiven Aktionen. Periodische API
 ===== Voraussetzungen =====
 
   * LoxBerry 4.0.0 oder neuer
-  * VELUX ACTIVE / VELUX App Control Installation
+  * VELUX ACTIVE / VELUX App Control Installation mit KIX 300 oder KIG 300 Gateway
   * gültiges VELUX Benutzerkonto
   * Netzwerk-/Internetzugriff des LoxBerry zur VELUX-Schnittstelle
   * Netzwerkverbindung zwischen LoxBerry und Loxone Miniserver
@@ -64,6 +76,8 @@ Die CGI-Seiten dienen der Oberfläche und interaktiven Aktionen. Periodische API
   - Unter **Einstellungen** die VELUX-Zugangsdaten eintragen.
   - Loxone Miniserver und UDP-Ports auswählen.
   - Abrufintervall konfigurieren.
+
+**Empfehlung:** Das Abrufintervall sollte mindestens **3 Minuten** betragen. Kürzere Intervalle können zu unvollständigen API-Antworten, temporären Verbindungsproblemen und Störungen bei Steuerbefehlen führen. 1–2 Minuten sind technisch möglich, werden aber nicht empfohlen.
   - Einstellungen speichern.
   - **VELUX Daten jetzt abrufen** ausführen.
   - Unter **UDP Messages** die gewünschten Werte auswählen.
@@ -80,7 +94,9 @@ Zugangsdaten werden bei einem erfolgreichen Token-Refresh nicht automatisch gel�
 
 ===== Gateway-Kopplung =====
 
-Für bestimmte signierte Steuerbefehle kann eine Gateway-Kopplung erforderlich sein.
+VELUX Active Connect unterstützt sowohl KIX 300 als auch KIG 300. Für signierte Dachfensterbefehle wird das Gateway gekoppelt und ein lokaler Signierschlüssel verwendet. Beim KIG 300 erfolgt die Kopplung zweistufig: Das Plugin bereitet zuerst die Schlüsselabfrage über die VELUX-Cloud vor. Danach wird die Pairing-Taste am Gateway gedrückt und der Schlüssel lokal über TCP-Port 25050 abgerufen.
+
+Vorhandene Kopplungsdaten werden erst nach einer vollständig erfolgreichen neuen Kopplung ersetzt und bleiben bei Plugin-Updates erhalten.
 
 Nach erfolgreicher Kopplung zeigt die Statusseite sinngemäß:
 
@@ -183,13 +199,13 @@ Nur Befehle, die das jeweilige Gerät unterstützt, sollten verwendet werden.
 Typische Befehle:
 
 <code>
-velux.cmd.dachfenster_bad.open=1
-velux.cmd.dachfenster_bad.stop=1
-velux.cmd.dachfenster_bad.close=1
-velux.cmd.dachfenster_bad.position=50
+velux.cmd.dachfenster_bad.open=\v
+velux.cmd.dachfenster_bad.stop=\v
+velux.cmd.dachfenster_bad.close=\v
+velux.cmd.dachfenster_bad.position=\v
 </code>
 
-Für API-Aufrufe notwendige Kontexte wie ''home_id'' werden vom Plugin berücksichtigt.
+Dabei gilt für Loxone: ''\v=1'' für ''open'', ''stop'' und ''close''; bei ''position'' ist ''\v'' der Analogwert von ''0'' bis ''100''. Für API-Aufrufe notwendige Kontexte wie ''home_id'' werden vom Plugin berücksichtigt.
 
 ===== VELUX-Automatik =====
 
@@ -198,22 +214,24 @@ Manuelle Fenstersteuerung kann den VELUX-Modus auf ''manual'' setzen. Das Plugin
 Befehl aus Loxone:
 
 <code>
-velux.cmd.velux_active.automation=1
+velux.cmd.velux_active.automation=\v
 </code>
 
-Intern wird die vorhandene VELUX-Logik zur Freigabe der Automatik verwendet, unter anderem der Zustand:
+Für den Steuerbefehl gilt ''\v=1'': Die vorhandene VELUX-Logik gibt die Automatik wieder frei. Status und Steuerung sind bewusst getrennt.
+
+VELUX liefert den Gerätemodus intern als Text. Das Plugin behält diesen Originalwert für Status/Diagnose bei, überträgt ''module.<gerät>.mode'' an Loxone jedoch numerisch:
+
+  * ''0'' = ''algo_disabled'' – Automatik deaktiviert
+  * ''1'' = ''algo_available'' – Automatik freigegeben/verfügbar
+  * ''2'' = ''algo_active'' – VELUX-Automatik aktuell aktiv
+
+Beispiel:
 
 <code>
-mode=algo_available
+velux.module.dachfenster_bad.mode=2
 </code>
 
-Bedeutung wichtiger Textzustände:
-
-  * ''manual'' = manueller Betrieb
-  * ''algo_available'' = Automatik ist freigegeben/verfügbar
-  * ''algo_active'' = VELUX-Automatik greift aktuell aktiv ein
-
-Diese Zustände sind Textwerte und müssen in Loxone entsprechend als Text ausgewertet bzw. per Befehlserkennung weiterverarbeitet werden.
+Damit kann der Automatikzustand in Loxone direkt numerisch ausgewertet werden. Ein unbekannter zukünftiger VELUX-Modus wird nicht künstlich auf einen falschen Zahlenwert abgebildet.
 
 ===== Loxone-Beispiele =====
 
@@ -224,15 +242,15 @@ In Loxone Config einen virtuellen UDP-Ausgang mit der IP-Adresse des LoxBerry un
 Beispiel Befehle bei EIN:
 
 <code>
-velux.cmd.dachfenster_bad.open=1
-velux.cmd.dachfenster_bad.close=1
-velux.cmd.dachfenster_bad.stop=1
+velux.cmd.dachfenster_bad.open=\v
+velux.cmd.dachfenster_bad.close=\v
+velux.cmd.dachfenster_bad.stop=\v
 </code>
 
 Für eine Position kann beispielsweise gesendet werden:
 
 <code>
-velux.cmd.dachfenster_bad.position=50
+velux.cmd.dachfenster_bad.position=\v
 </code>
 
 Bei virtuellen UDP-Ausgängen **Verbindung nach Senden schließen** aktivieren.
@@ -245,7 +263,7 @@ Für numerische Werte wird der jeweilige Wert hinter dem Gleichheitszeichen ausg
 velux.module.dachfenster_bad.position=50
 </code>
 
-Textzustände wie ''algo_active'' sollten in Loxone über passende Befehlserkennung/Textauswertung verarbeitet werden.
+Für ''velux.module.dachfenster_bad.mode=\v'' gilt: ''0'' = Automatik deaktiviert, ''1'' = Automatik verfügbar, ''2'' = Automatik aktiv.
 
 ===== Status =====
 
@@ -340,7 +358,7 @@ Nach einem LoxBerry- oder Plugin-Neustart werden temporär noch nicht verfügbar
 Folgenden Befehl senden:
 
 <code>
-velux.cmd.velux_active.automation=1
+velux.cmd.velux_active.automation=\v
 </code>
 
 ==== AUF oder Position schlägt fehl ====

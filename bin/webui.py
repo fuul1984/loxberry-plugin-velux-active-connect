@@ -17,6 +17,16 @@ def esc(x): return html.escape(str(x),quote=True)
 def fmt_ts(ts):
     try:return time.strftime("%d.%m.%Y %H:%M:%S",time.localtime(int(ts)))
     except:return "-"
+def loxone_value(key, value):
+    # Loxone-facing representation. Raw VELUX values remain in state.json.
+    if str(key).startswith("module.") and str(key).endswith(".mode"):
+        return {
+            "algo_disabled": 0,
+            "algo_available": 1,
+            "algo_active": 2,
+        }.get(str(value), value)
+    return value
+
 def display_value(value, meta=None):
     meta=meta or {}
     if meta.get("unit")=="°C":
@@ -137,12 +147,20 @@ def save_main_settings():
     cfg["email"]=form.get("email",cfg.get("email","")).strip()
     pw=form.get("password","")
     if pw: cfg["password"]=pw
-    cfg["poll_interval_minutes"]=max(1,int(form.get("poll_interval_minutes",cfg.get("poll_interval_minutes",5))))
+    cfg["poll_interval_minutes"]=max(1,int(form.get("poll_interval_minutes",cfg.get("poll_interval_minutes",3))))
+    ev=cfg.get("eventstream",{}) if isinstance(cfg.get("eventstream",{}),dict) else {}
+    ev["enabled"]="eventstream_enabled" in form
+    ev["mode"]="production"
+    try: ev["port"]=max(1,min(65535,int(form.get("event_hap_port",ev.get("port",5001)) or ev.get("port",5001) or 5001)))
+    except (TypeError,ValueError): ev["port"]=int(ev.get("port",5001) or 5001)
+    cfg["eventstream"]=ev
     cfg["udp_enabled"]="udp_enabled" in form
     cfg["miniserver_no"]=max(1,int(form.get("miniserver_no",cfg.get("miniserver_no",1))))
     cfg["udp_port"]=int(form.get("udp_port",cfg.get("udp_port",7000)))
     cfg["udp_prefix"]=form.get("udp_prefix",cfg.get("udp_prefix","velux")).strip() or "velux"
     cfg["heartbeat_enabled"]="heartbeat_enabled" in form
+    try: cfg["heartbeat_error_threshold"]=max(1,min(20,int(form.get("heartbeat_error_threshold",cfg.get("heartbeat_error_threshold",3)))))
+    except (TypeError,ValueError): cfg["heartbeat_error_threshold"]=3
     cfg["udp_heartbeat_key"]=form.get("udp_heartbeat_key",cfg.get("udp_heartbeat_key","heartbeat")).strip() or "heartbeat"
     cfg["udp_auto_new"]="udp_auto_new" in form
     mode=form.get("udp_send_mode",cfg.get("udp_send_mode","always"))
@@ -151,6 +169,8 @@ def save_main_settings():
     c["enabled"]="control_enabled" in form
     c["udp_listen_port"]=int(form.get("control_udp_listen_port",c.get("udp_listen_port",7001)))
     c["command_prefix"]=form.get("control_command_prefix",c.get("command_prefix","velux.cmd")).strip() or "velux.cmd"
+    primary=form.get("control_primary_path",c.get("primary_path","direct")).strip().lower()
+    c["primary_path"]=primary if primary in ("direct","cloud") else "direct"
     sender_ips=selected_sender_ips()
     if sender_ips is not None:
         c["allowed_senders"]=sender_ips
@@ -159,6 +179,8 @@ def save_main_settings():
     try: (DATA/"udp_last_sent.json").unlink()
     except FileNotFoundError: pass
     try: subprocess.run([str(BIN/"control_watchdog.sh")],capture_output=True,text=True,timeout=10)
+    except Exception: pass
+    try: subprocess.run([str(BIN/"event_watchdog.sh")],capture_output=True,text=True,timeout=10)
     except Exception: pass
     if pw and pw != old_pw:
         try: token_file.unlink()
@@ -197,7 +219,11 @@ def save_control_settings():
     cfg["control"]=c; save_cfg(cfg)
 
 try:
-    if action=="save_settings": save_main_settings(); message="Einstellungen gespeichert."; message_cls="okbox"; page="settings"
+    if action=="save_settings":
+        save_main_settings()
+        try: subprocess.run([str(BIN/"event_watchdog.sh")],capture_output=True,text=True,timeout=10)
+        except Exception: pass
+        message="Einstellungen gespeichert."; message_cls="okbox"; page="settings"
     elif action=="save_udp": save_udp_settings(); message="UDP-Messages gespeichert."; message_cls="okbox"; page="udp"
     elif action in ("udp_all_on","udp_all_off"):
         vals=state.get("values",{}) if isinstance(state.get("values",{}),dict) else {}
@@ -238,19 +264,84 @@ try:
         except Exception as e:
             message=f"UDP-Listener Selbsttest fehlgeschlagen: {e}"; message_cls="badbox"
         page="control"
-    elif action=="pair_gateway":
+    elif action=="event_reinit":
+        env=os.environ.copy(); env.update({"LBPCONFIGDIR":str(CFG),"LBPDATADIR":str(DATA),"LBPLOGDIR":str(LOG)})
+        r=subprocess.run([sys.executable,str(BIN/"event_setup.py"),"accessories"],capture_output=True,text=True,timeout=60,env=env)
+        try: result=json.loads(r.stdout.strip() or "[]")
+        except Exception: result=[]
+        if r.returncode==0 and isinstance(result,list) and result:
+            ev=cfg.get("eventstream",{}) if isinstance(cfg.get("eventstream",{}),dict) else {}
+            ev["enabled"]=True; ev["mode"]="production"; cfg["eventstream"]=ev; save_cfg(cfg)
+            try:
+                pid=(DATA/"event_listener.pid")
+                if pid.exists():
+                    oldpid=int(pid.read_text().strip()); os.kill(oldpid,15); time.sleep(1)
+            except Exception: pass
+            try: subprocess.run([str(BIN/"event_watchdog.sh")],capture_output=True,text=True,timeout=10)
+            except Exception: pass
+            message=f"Eventstream neu initialisiert: {len(result)} Event-Werte eingerichtet."; message_cls="okbox"
+        else:
+            message="Eventstream konnte nicht neu initialisiert werden: "+str((result.get("error") if isinstance(result,dict) else "") or r.stderr.strip() or r.stdout.strip() or r.returncode); message_cls="badbox"
+        page="settings"
+    elif action=="event_pair":
+        ev=cfg.get("eventstream",{}) if isinstance(cfg.get("eventstream",{}),dict) else {}
+        env=os.environ.copy(); env.update({"LBPCONFIGDIR":str(CFG),"LBPDATADIR":str(DATA),"LBPLOGDIR":str(LOG)})
+        cmd=[sys.executable,str(BIN/"event_setup.py"),"pair"]
+        known_gateway_ip=str((cfg.get("signing",{}) if isinstance(cfg.get("signing",{}),dict) else {}).get("gateway_ip","") or "").strip()
+        if known_gateway_ip:
+            cmd += ["--host",known_gateway_ip]
+        cmd += ["--code",form.get("event_homekit_code","").strip(),"--port",form.get("event_hap_port",str(ev.get("port",5001) or 5001)).strip()]
+        r=subprocess.run(cmd,capture_output=True,text=True,timeout=75,env=env)
+        try: result=json.loads(r.stdout.strip() or "{}")
+        except: result={}
+        if r.returncode==0:
+            ev=cfg.get("eventstream",{}) if isinstance(cfg.get("eventstream",{}),dict) else {}
+            try: ev["port"]=int(form.get("event_hap_port",ev.get("port",5001)) or 5001)
+            except (TypeError,ValueError): ev["port"]=5001
+            ev["enabled"]=True
+            ev["mode"]="production"
+            cfg["eventstream"]=ev; save_cfg(cfg)
+            # A fresh HAP pairing may expose a different gateway/accessory AID layout.
+            # Never carry learned mappings across a new pairing.
+            for stale in (DATA/"hap_device_mapping.json", DATA/"hap_mapping_pending.json"):
+                try: stale.unlink()
+                except FileNotFoundError: pass
+                except Exception as e: log(f"HAP MAP RESET WARNUNG: {stale.name}: {e}")
+            log("HAP MAP RESET -> neue HAP-Kopplung; gelernte AID-Zuordnungen wurden verworfen")
+            # Productive setup: after Pair-Setup, determine event-capable
+            # characteristics automatically. This replaces the former
+            # diagnostic "Event-Werte lesen" button.
+            scan=subprocess.run([sys.executable,str(BIN/"event_setup.py"),"accessories"],capture_output=True,text=True,timeout=60,env=env)
+            try: scan_result=json.loads(scan.stdout.strip() or "[]")
+            except Exception: scan_result=[]
+            if scan.returncode!=0 or not isinstance(scan_result,list) or not scan_result:
+                message="HAP-Kopplung erfolgreich, aber Event-Characteristics konnten nicht automatisch eingerichtet werden: "+(scan.stderr.strip() or scan.stdout.strip() or "keine eventfähigen Werte gefunden")
+                message_cls="badbox"
+            else:
+                try: subprocess.run([str(BIN/"event_watchdog.sh")],capture_output=True,text=True,timeout=10)
+                except Exception: pass
+                message=f"Lokales HAP/Eventstream-Pairing erfolgreich. {len(scan_result)} Event-Werte eingerichtet. Der HomeKit-Code wurde nicht gespeichert."
+                message_cls="okbox"
+        else: message="Eventstream-Aktion fehlgeschlagen: "+str(result.get("error") or r.stderr.strip() or r.stdout.strip() or r.returncode); message_cls="badbox"
+        page="settings"
+    elif action in ("pair_gateway_prepare","pair_gateway_fetch"):
         host=form.get("gateway_ip","").strip()
         gateway_id=form.get("gateway_id","").strip()
-        if not host:
+        mode="prepare" if action=="pair_gateway_prepare" else "fetch"
+        if mode=="prepare" and not host:
             message="Gateway-IP fehlt."; message_cls="badbox"; page="settings"
         else:
             env=os.environ.copy(); env.update({"LBPCONFIGDIR":str(CFG),"LBPDATADIR":str(DATA),"LBPLOGDIR":str(LOG)})
-            cmd=[sys.executable,str(BIN/"gateway_pair.py"),"--host",host]
-            if gateway_id: cmd+=["--gateway-id",gateway_id]
+            cmd=[sys.executable,str(BIN/"gateway_pair.py"),"--mode",mode]
+            if mode=="prepare":
+                cmd+=["--host",host]
+                if gateway_id: cmd+=["--gateway-id",gateway_id]
             r=subprocess.run(cmd,capture_output=True,text=True,timeout=60,env=env)
             cfg=load(config_file,cfg)
-            if r.returncode==0:
-                message="Gateway erfolgreich gekoppelt. Signierschlüssel wurde gespeichert."; message_cls="okbox"
+            if r.returncode==0 and mode=="prepare":
+                message="Gateway vorbereitet. Bitte jetzt die Pairing-Taste am VELUX Gateway drücken und danach 'Taste gedrückt – Schlüssel abrufen' wählen. Der vorhandene Signierschlüssel bleibt bis zum vollständigen Erfolg erhalten."; message_cls="okbox"
+            elif r.returncode==0:
+                message="Gateway erfolgreich gekoppelt. Neuer Signierschlüssel wurde vollständig abgerufen und gespeichert."; message_cls="okbox"
             else:
                 try: err=json.loads(r.stdout.strip()).get("error")
                 except: err=None
@@ -429,12 +520,60 @@ if page=="settings":
     signing=cfg.get("signing",{}) if isinstance(cfg.get("signing",{}),dict) else {}
     gateways=[d for d in state.get("devices",[]) if str(d.get("type","")).upper()=="NXG"]
     print('<form method="post"><input type="hidden" name="page" value="settings">')
-    print('<div class="card"><div class="section-head"><div><h2>VELUX Konto</h2><div class="muted">Anmeldung an VELUX ACTIVE / App Control. Das Passwortfeld bleibt beim Speichern unverändert, wenn es leer ist.</div></div></div><div class="grid">')
+    print('<div class="card"><div class="section-head"><div><h2>VELUX Cloud</h2><div class="muted">Cloud-Anmeldung und regelmäßiger Datenabruf über VELUX ACTIVE / App Control. Das Passwortfeld bleibt beim Speichern unverändert, wenn es leer ist.</div></div></div><div class="grid">')
     print(f'<div class="field"><label>E-Mail</label><input type="text" name="email" value="{esc(cfg.get("email",""))}" autocomplete="username"></div>')
     print('<div class="field"><label>Passwort</label><input type="password" name="password" placeholder="Gespeichertes Passwort unverändert lassen" autocomplete="current-password"></div></div></div>')
     print('<div class="card"><h2>Abruf & Plugin</h2><div class="grid">')
-    print(f'<div class="field"><label>Abrufintervall</label><input type="number" min="1" name="poll_interval_minutes" value="{esc(cfg.get("poll_interval_minutes",5))}"><div class="help">Intervall in Minuten. Der Scheduler prüft jede Minute, ob ein Abruf fällig ist.</div></div>')
+    print(f'<div class="field"><label>Abrufintervall</label><input type="number" min="1" name="poll_interval_minutes" value="{esc(cfg.get("poll_interval_minutes",3))}"><div class="help">Intervall in Minuten. Der Scheduler prüft jede Minute, ob ein Abruf fällig ist.<br><strong>Empfehlung: mindestens 3 Minuten.</strong> Kürzere Abrufintervalle können bei VELUX-Gateways zu unvollständigen API-Antworten, temporären Verbindungsproblemen und Störungen bei Steuerbefehlen führen. Für einen stabilen Betrieb werden <strong>3 Minuten oder länger</strong> empfohlen.</div></div>')
     print(f'<div class="field"><label>Pluginstatus</label><div class="statuspill {"on" if cfg.get("plugin_enabled",True) else "off"}">{"Aktiv" if cfg.get("plugin_enabled",True) else "Inaktiv"}</div><div class="help">Aktivieren/Deaktivieren erfolgt auf der Statusseite.</div></div></div></div>')
+    print('<div class="card"><h2>Cloud-Steuerung · Gateway-Kopplung</h2>')
+    try:
+        dep=subprocess.run([sys.executable,"-c","import cryptography; print(cryptography.__version__)"],capture_output=True,text=True,timeout=5)
+        crypto_ok=dep.returncode==0
+        print(f'<div class="statusbar"><span class="statuspill {"on" if crypto_ok else "off"}">Kryptografie: {"bereit" if crypto_ok else "fehlt"}</span><span class="statuspill {"on" if signing.get("sign_key_id") and signing.get("hash_sign_key") else "off"}">Gateway: {"gekoppelt" if signing.get("sign_key_id") and signing.get("hash_sign_key") else "nicht gekoppelt"}</span></div>')
+    except Exception:
+        print('<div class="statuspill off">Kryptografie: Prüfung fehlgeschlagen</div>')
+    if signing.get("sign_key_id") and signing.get("hash_sign_key"):
+        print(f'<p><b>Gateway-ID:</b> <code>{esc(signing.get("gateway_id",""))}</code><br><b>Gateway-IP:</b> {esc(signing.get("gateway_ip",""))}<br><b>Gekoppelt:</b> {esc(fmt_ts(signing.get("paired_at")))}</p>')
+    print('<div class="grid">')
+    print(f'<div class="field"><label>Gateway-IP</label><input type="text" name="gateway_ip" value="{esc(signing.get("gateway_ip",""))}" placeholder="192.168.1.x"></div>')
+    print('<div class="field"><label>Gateway</label><select name="gateway_id">')
+    if gateways:
+        for g in gateways:
+            sel=' selected' if g.get("id")==signing.get("gateway_id") else ''
+            print(f'<option value="{esc(g.get("id"))}"{sel}>{esc(g.get("name"))} – {esc(g.get("id"))}</option>')
+    else: print('<option value="">Kein NXG-Gateway erkannt</option>')
+    print('</select></div></div><div class="help"><b>Teil der VELUX Cloud-Steuerung.</b> Die Kopplung wird für signierte Cloud-Befehle und den Cloud-Fallback benötigt.<br>Zweistufige Kopplung: Zuerst bereitet die VELUX-Cloud das Gateway vor. Danach die Pairing-Taste am Gateway drücken und erst anschließend den Signierschlüssel lokal über TCP-Port 25050 abrufen.</div>')
+    pending=load(DATA/"pairing_pending.json",{})
+    pending_age=int(time.time())-int(pending.get("prepared_at",0) or 0) if pending.get("prepared_at") else 999999
+    pending_ok=bool(pending.get("host") and pending.get("gateway_id") and 0 <= pending_age <= 15*60)
+    print('<div class="actions" style="margin-top:12px"><button class="btn secondary" name="action" value="pair_gateway_prepare">1. Kopplung vorbereiten</button>')
+    if pending_ok:
+        print('<button class="btn primary" name="action" value="pair_gateway_fetch">2. Taste gedrückt – Schlüssel abrufen</button>')
+        print(f'<span class="muted">Vorbereitet für {esc(pending.get("host",""))}; bestehender Schlüssel bleibt bis zum Erfolg erhalten.</span>')
+    print('</div></div>')
+    ev=cfg.get("eventstream",{}) if isinstance(cfg.get("eventstream",{}),dict) else {}
+    evst=load(DATA/"event_status.json",{}); evchars=load(DATA/"event_characteristics.json",[])
+    gw=ev.get("gateway",{}) if isinstance(ev.get("gateway",{}),dict) else {}
+    hap_paired=bool(evst.get("paired") or (CFG/"homekit_pairing.json").exists())
+    localmap=load(DATA/"hap_local_mapping.json",{})
+    hapmap=load(DATA/"hap_device_mapping.json",{})
+    local_keys={e.get("key") for e in localmap.values() if isinstance(e,dict) and e.get("key")} if isinstance(localmap,dict) else set()
+    mapped_positions={e.get("position_key") for e in hapmap.values() if isinstance(e,dict) and e.get("position_key")} if isinstance(hapmap,dict) else set()
+    position_keys=[k for k in state.get("values",{}) if str(k).startswith("module.") and str(k).endswith(".position")] if isinstance(state,dict) else []
+    if len(position_keys)==1 and any(str(c.get("name","")).lower().startswith("position.") for c in evchars if isinstance(c,dict)): mapped_positions.add(position_keys[0])
+    local_published=len(local_keys | mapped_positions)
+    print('<div class="card"><h2>Lokale VELUX-Verbindung · KIX/KIG (HomeKit/HAP)</h2><div class="muted"><b>Empfohlen: Cloud und lokale Verbindung einrichten.</b> Das Plugin erkennt automatisch alle lokal verfügbaren HAP-Werte. Lokal verfügbare Werte werden bevorzugt und Änderungen unmittelbar verarbeitet; die VELUX Cloud ergänzt nur Funktionen und Werte, die lokal nicht verfügbar oder nicht eindeutig zuordenbar sind. Eine manuelle AID/IID-Zuordnung ist nicht erforderlich.</div>')
+    print(f'<div class="statusbar"><span class="statuspill {"on" if ev.get("enabled") else "off"}">Eventstream: {"aktiv" if ev.get("enabled") else "inaktiv"}</span><span class="statuspill {"on" if hap_paired else "off"}">HAP: {"gekoppelt" if hap_paired else "nicht gekoppelt"}</span><span class="statuspill">Lokal erkannt: {len(evchars) if isinstance(evchars,list) else 0} Characteristics</span><span class="statuspill on">Lokal verwendet: {local_published} UDP-Werte</span></div>')
+    print(f'<label class="switchline"><input type="checkbox" name="eventstream_enabled" {checked(ev.get("enabled",False))}> Lokale Verbindung / Eventstream aktiv</label>')
+    print(f'<div class="grid" style="margin-top:10px"><div class="field"><label>HAP-Port</label><input type="number" min="1" max="65535" name="event_hap_port" value="{esc(ev.get("port",5001) or 5001)}"><div class="help">Standard bei Neuinstallation: 5001. Ein gespeicherter bzw. erkannter Port wird übernommen.</div></div><div class="field"><label>HomeKit Setup-Code</label><input type="password" name="event_homekit_code" placeholder="{"Vorhanden – nichts ändern" if hap_paired else "123-45-678"}" autocomplete="off"><div class="help">{"Vorhanden – nichts ändern. Der Setup-Code wird nicht gespeichert oder angezeigt." if hap_paired else "Nur für die erstmalige Kopplung erforderlich; der Code wird nicht gespeichert."}</div></div></div>')
+    if not hap_paired:
+        print('<div class="actions"><button class="btn primary" name="action" value="event_pair">Lokale Verbindung koppeln</button></div>')
+    else:
+        if gw:
+            print(f'<div class="help">Gekoppeltes HAP-Gateway: {esc(gw.get("host","?"))}:{esc(gw.get("port",ev.get("port",5001)))}</div>')
+        print('<div class="actions"><button class="btn secondary" name="action" value="event_reinit">Lokale Werte neu erkennen</button></div><div class="help">Prüft das gekoppelte Gateway vollständig neu und übernimmt alle eindeutig zuordenbaren lokalen Werte automatisch. Es ist kein HomeKit-Code erforderlich.</div>')
+    print('</div>')
     print('<div class="card"><div class="section-head"><div><h2>VELUX → Loxone · UDP Statuswerte</h2><div class="muted">Nur die wichtigsten Einstellungen direkt sichtbar. Die Auswahl einzelner Werte erfolgt unter „UDP Messages“.</div></div></div>')
     print('<div class="compact-grid">')
     print('<div class="subcard"><h3>Versand</h3>')
@@ -452,10 +591,11 @@ if page=="settings":
     print(f'<div class="field"><label>UDP-Port</label><input type="number" name="udp_port" min="1" max="65535" value="{esc(cfg.get("udp_port",7000))}"></div></div></div>')
     print('<details class="advanced"><summary>Erweiterte UDP-Einstellungen</summary><div class="compact-grid" style="margin-top:10px">')
     print(f'<div class="field"><label>Status-Präfix</label><input type="text" name="udp_prefix" value="{esc(cfg.get("udp_prefix","velux"))}"><div class="help">Beispiel: velux.module.dachfenster_bad.position</div></div>')
-    print(f'<div class="field"><label class="switchline"><input type="checkbox" name="heartbeat_enabled" {checked(cfg.get("heartbeat_enabled",True))}> Heartbeat senden</label><input type="text" name="udp_heartbeat_key" value="{esc(cfg.get("udp_heartbeat_key","heartbeat"))}" aria-label="Heartbeat-Name"><div class="help">Name des Heartbeat-Werts.</div></div>')
+    print(f'<div class="field"><label class="switchline"><input type="checkbox" name="heartbeat_enabled" {checked(cfg.get("heartbeat_enabled",True))}> Heartbeat senden</label><input type="text" name="udp_heartbeat_key" value="{esc(cfg.get("udp_heartbeat_key","heartbeat"))}" aria-label="Heartbeat-Name"><div class="help">Name des Heartbeat-Werts.</div><label style="margin-top:8px">Heartbeat – Fehlertoleranz</label><input type="number" min="1" max="20" name="heartbeat_error_threshold" value="{esc(cfg.get("heartbeat_error_threshold",3))}"><div class="help">Anzahl aufeinanderfolgender temporärer Cloud-/API-Fehler bis Heartbeat 0. Empfehlung: nicht unter 3.</div></div>')
     print(f'<div class="field"><label class="switchline"><input type="checkbox" name="udp_auto_new" {checked(cfg.get("udp_auto_new",True))}> Neue erkannte Werte automatisch aktivieren</label><div class="help">Kann anschließend unter „UDP Messages“ individuell angepasst werden.</div></div>')
     print('</div></details><div class="help" style="margin-top:10px">Welche Werte gesendet werden, stellst du übersichtlich auf der Seite <b>UDP Messages</b> ein.</div></div>')
     print('<div class="card"><h2>Loxone → VELUX · UDP Steuerung</h2><div class="grid">')
+    print('<div class="field"><label>Steuerweg</label><div class="statuspill on">Automatisch · Local-first</div><div class="help">Das Plugin verwendet automatisch HAP/HomeKit, wenn der Befehl lokal und eindeutig unterstützt wird. Andernfalls erfolgt Cloud-Fallback. STOP und VELUX-Automatik bleiben Cloud, solange das Gateway dafür keinen sicheren lokalen Schreibbefehl anbietet.</div></div>')
     print(f'<div class="field"><label class="switchline"><input type="checkbox" name="control_enabled" {checked(c.get("enabled",False))}> UDP-Steuerung aktiv</label><div class="help">Startet den überwachten Listener für Loxone-Befehle.</div></div>')
     print(f'<div class="field"><label>UDP-Empfangsport</label><input type="number" min="1" max="65535" name="control_udp_listen_port" value="{esc(c.get("udp_listen_port",7001))}"></div>')
     print(f'<div class="field"><label>Befehls-Präfix</label><input type="text" name="control_command_prefix" value="{esc(c.get("command_prefix","velux.cmd"))}"><div class="help">Standard: velux.cmd</div></div></div>')
@@ -469,25 +609,6 @@ if page=="settings":
         detail=(" – "+esc(miniserver_error)) if miniserver_error else ""
         print(f'<div class="badbox"><b>Keine Miniserver gefunden{detail}.</b><br>Vorhandene erlaubte Absender bleiben beim Speichern unverändert.</div>')
     print('<div class="help">Ohne ausgewählten Absender werden Netzwerk-Steuerbefehle abgewiesen. Der lokale Selbsttest bleibt möglich.</div></div>')
-    print('<div class="card"><h2>VELUX Gateway Kopplung</h2>')
-    try:
-        dep=subprocess.run([sys.executable,"-c","import cryptography; print(cryptography.__version__)"],capture_output=True,text=True,timeout=5)
-        crypto_ok=dep.returncode==0
-        print(f'<div class="statusbar"><span class="statuspill {"on" if crypto_ok else "off"}">Kryptografie: {"bereit" if crypto_ok else "fehlt"}</span><span class="statuspill {"on" if signing.get("sign_key_id") and signing.get("hash_sign_key") else "off"}">Gateway: {"gekoppelt" if signing.get("sign_key_id") and signing.get("hash_sign_key") else "nicht gekoppelt"}</span></div>')
-    except Exception:
-        print('<div class="statuspill off">Kryptografie: Prüfung fehlgeschlagen</div>')
-    if signing.get("sign_key_id") and signing.get("hash_sign_key"):
-        print(f'<p><b>Gateway-ID:</b> <code>{esc(signing.get("gateway_id",""))}</code><br><b>Gateway-IP:</b> {esc(signing.get("gateway_ip",""))}<br><b>Gekoppelt:</b> {esc(fmt_ts(signing.get("paired_at")))}</p>')
-    print('<div class="grid">')
-    print(f'<div class="field"><label>Gateway-IP</label><input type="text" name="gateway_ip" value="{esc(signing.get("gateway_ip",""))}" placeholder="192.168.1.x"></div>')
-    print('<div class="field"><label>Gateway</label><select name="gateway_id">')
-    if gateways:
-        for g in gateways:
-            sel=' selected' if g.get("id")==signing.get("gateway_id") else ''
-            print(f'<option value="{esc(g.get("id"))}"{sel}>{esc(g.get("name"))} – {esc(g.get("id"))}</option>')
-    else: print('<option value="">Kein NXG-Gateway erkannt</option>')
-    print('</select></div></div><div class="help">Für die Kopplung muss TCP-Port 25050 zum Gateway erreichbar sein.</div>')
-    print('<div class="actions" style="margin-top:12px"><button class="btn secondary" name="action" value="pair_gateway">Gateway koppeln</button></div></div>')
     print('<div class="card"><div class="actions"><button class="btn primary" name="action" value="save_settings">Einstellungen speichern</button></div></div></form>')
 elif page=="udp":
     vals=state.get("values",{}) if isinstance(state.get("values",{}),dict) else {}
@@ -515,22 +636,32 @@ elif page=="udp":
     print('<div class="actions"><form method="post"><input type="hidden" name="page" value="udp"><button class="btn secondary" name="action" value="udp_all_on">Alle aktivieren</button><button class="btn ghost" name="action" value="udp_all_off">Alle deaktivieren</button></form></div><div class="help">Globale UDP-Einstellungen werden unter Einstellungen geändert.</div></div>')
     print('<form method="post"><input type="hidden" name="page" value="udp"><div class="card"><h2>Erkannte Werte</h2>')
     if vals:
-        print('<table class="responsive udp-table"><thead><tr><th>Senden</th><th>VELUX Wert</th><th>Aktuell</th><th>UDP Message</th></tr></thead><tbody>')
+        print('<table class="responsive udp-table"><thead><tr><th>Senden</th><th>VELUX Wert</th><th>Aktuell</th><th>Quelle</th><th>UDP Message</th></tr></thead><tbody>')
         for i,key in enumerate(sorted(vals)):
             rule=rules.get(key,{}); en=rule.get("enabled",cfg.get("udp_auto_new",True)) if isinstance(rule,dict) else cfg.get("udp_auto_new",True); name=(rule.get("name") if isinstance(rule,dict) else None) or key; m=meta.get(key,{})
-            print(f'<tr><td data-label="Senden"><div class="udp-check"><input class="udp-checkbox" type="checkbox" name="udp_en_{i}" {checked(en)} title="Diesen Wert an Loxone senden" aria-label="Diesen Wert an Loxone senden"></div><input type="hidden" name="udp_key_{i}" value="{esc(key)}"></td><td data-label="VELUX Wert"><b>{esc(m.get("label",key))}</b><code class="udp-key">{esc(key)}</code></td><td class="udp-current" data-label="Aktuell">{esc(display_value(vals[key],m))} {esc(m.get("unit",""))}</td><td data-label="UDP Message"><input class="udpname" type="text" name="udp_name_{i}" value="{esc(name)}"><div class="help"><code>{esc(cfg.get("udp_prefix","velux"))}.{esc(name)}</code></div></td></tr>')
+            shown=loxone_value(key, vals[key])
+            localmap=load(DATA/"hap_local_mapping.json",{})
+            mapped_keys={e.get("key") for e in localmap.values() if isinstance(e,dict) and e.get("key")} if isinstance(localmap,dict) else set()
+            hapmap=load(DATA/"hap_device_mapping.json",{})
+            mapped_positions={e.get("position_key") for e in hapmap.values() if isinstance(e,dict) and e.get("position_key")} if isinstance(hapmap,dict) else set()
+            kl=str(key).lower()
+            event_capable=(key in mapped_keys) or (key in mapped_positions) or ((kl.startswith("module.") and kl.endswith(".position")) and len([k for k in vals if str(k).startswith("module.") and str(k).endswith(".position")])==1)
+            source_label="Lokal (Eventstream) + Cloud-Fallback" if event_capable else "Cloud"
+            print(f'<tr><td data-label="Senden"><div class="udp-check"><input class="udp-checkbox" type="checkbox" name="udp_en_{i}" {checked(en)} title="Diesen Wert an Loxone senden" aria-label="Diesen Wert an Loxone senden"></div><input type="hidden" name="udp_key_{i}" value="{esc(key)}"></td><td data-label="VELUX Wert"><b>{esc(m.get("label",key))}</b><code class="udp-key">{esc(key)}</code></td><td class="udp-current" data-label="Aktuell">{esc(display_value(shown,m))} {esc(m.get("unit",""))}</td><td data-label="Quelle"><span class="badge">{esc(source_label)}</span></td><td data-label="UDP Message"><input class="udpname" type="text" name="udp_name_{i}" value="{esc(name)}"><div class="help"><code>{esc(cfg.get("udp_prefix","velux"))}.{esc(name)}=\\v</code></div></td></tr>')
         print(f'</tbody></table><input type="hidden" name="udp_count" value="{len(vals)}">')
     else: print('<div class="badbox">Noch keine Werte vorhanden. Bitte zuerst auf der Statusseite <b>VELUX Daten jetzt abrufen</b> ausführen.</div>')
     print('<div class="actions" style="margin-top:14px"><button class="btn primary" name="action" value="save_udp">UDP-Auswahl speichern</button></div></div></form>')
 elif page=="control":
     c=cfg.get("control",{}) if isinstance(cfg.get("control",{}),dict) else {}
-    print('<div class="card"><h2>Steuerung</h2><p>Hier kannst du die erkannten VELUX-Aktoren direkt bedienen. Die Loxone-Konfiguration findest du unter <b>Einstellungen</b>.</p></div>')
+    primary_label="Direkt (HAP/HomeKit)"
+    fallback_label="Cloud"
+    print('<div class="card"><h2>Steuerung</h2><p>Hier kannst du die erkannten VELUX-Aktoren bedienen.</p><p><b>Betriebsart:</b> Local-first &nbsp;→&nbsp; <b>Fallback:</b> Cloud<br><span class="muted">Der Steuerweg wird automatisch je Gerät und Befehl gewählt. Lokal beschreibbare und eindeutig zugeordnete HAP-Funktionen werden direkt verwendet; alle übrigen Befehle gehen über die Cloud.</span></p></div>')
     paired=True
     print('<div class="card"><h2>VELUX ACTIVE Automatisierung</h2>')
     print('<p>Setzt den VELUX Fenstermodus wieder auf <code>algo_available</code> und gibt damit die automatische Lüftung wieder frei.</p>')
     if paired:
         print('<form method="post"><input type="hidden" name="page" value="control"><button class="btn primary" name="action" value="control_automation">Automatisierung aktivieren</button></form>')
-        print('<p><b>Loxone UDP:</b> <code>velux.cmd.velux_active.automation=1</code></p>')
+        print('<p><b>Loxone UDP:</b> <code>velux.cmd.velux_active.automation=\\v</code><br><span class="muted">\\v = 1 gibt die VELUX-Automatik wieder frei. Status: <code>module.&lt;gerät&gt;.mode</code> = 0 deaktiviert, 1 verfügbar, 2 aktiv.</span></p>')
     else:
         print('<p><b>Hinweis:</b> Dieser Automatik-Befehl benötigt keine Signatur.</p>')
     print('</div>')
@@ -555,7 +686,7 @@ elif page=="control":
         print(f'<div class="card {"okbox" if ok else "badbox"}"><h3>Letzter Steuerbefehl</h3><b>Quelle:</b> {esc(control_state.get("source","UDP"))}<br><b>Befehl:</b> <code>{esc(control_state.get("command","-"))}</code><br><b>Gerät:</b> {esc(control_state.get("device","-"))}<br><b>Ergebnis:</b> {esc(control_state.get("result","-"))}<br><b>Zeit:</b> {esc(fmt_ts(control_state.get("timestamp")))}</div>')
     devices=[d for d in state.get("devices",[]) if d.get("role")=="Aktor"]
     if devices:
-        print('<div class="card"><h2>Direktsteuerung</h2><p class="muted">Mit diesen Buttons wird der Befehl sofort an die VELUX-Cloud gesendet.</p>')
+        print(f'<div class="card"><h2>VELUX Aktorsteuerung</h2><p class="muted">Steuerweg automatisch: lokal wenn eindeutig unterstützt, sonst Cloud-Fallback. STOP derzeit Cloud.</p>')
         for d in devices:
             key=d.get("udp_key") or d.get("id")
             pos=pick(d,"current_position","position","target_position",default="-")
@@ -568,10 +699,10 @@ elif page=="control":
             port=c.get("udp_listen_port",7001)
             print('<details style="margin-top:10px"><summary><b>Loxone Beispiel anzeigen</b></summary><div style="padding:10px 0">')
             print(f'<p><b>Virtueller UDP-Ausgang – Adresse</b><br><code>/dev/udp/{esc(lbip)}/{esc(port)}</code><br><b>Verbindung nach Senden schließen:</b> aktivieren</p>')
-            print(f'<p><b>AUF – Befehl bei EIN</b><br><code>{esc(prefix)}.{esc(key)}.open=1</code><br><span class="muted">Befehl bei AUS: leer lassen</span></p>')
-            print(f'<p><b>STOP – Befehl bei EIN</b><br><code>{esc(prefix)}.{esc(key)}.stop=1</code><br><span class="muted">Befehl bei AUS: leer lassen</span></p>')
-            print(f'<p><b>ZU – Befehl bei EIN</b><br><code>{esc(prefix)}.{esc(key)}.close=1</code><br><span class="muted">Befehl bei AUS: leer lassen</span></p>')
-            print(f'<p><b>POSITION – analoger Ausgangsbefehl</b><br><code>{esc(prefix)}.{esc(key)}.position=&lt;v&gt;</code><br><span class="muted">&lt;v&gt; wird von Loxone durch den Analogwert 0–100 ersetzt.</span></p>')
+            print(f'<p><b>AUF – Befehl bei EIN</b><br><code>{esc(prefix)}.{esc(key)}.open=\\v</code><br><span class="muted">\\v = 1 für AUF</span></p>')
+            print(f'<p><b>STOP – Befehl bei EIN</b><br><code>{esc(prefix)}.{esc(key)}.stop=\\v</code><br><span class="muted">\\v = 1 für STOP</span></p>')
+            print(f'<p><b>ZU – Befehl bei EIN</b><br><code>{esc(prefix)}.{esc(key)}.close=\\v</code><br><span class="muted">\\v = 1 für ZU</span></p>')
+            print(f'<p><b>POSITION – analoger Ausgangsbefehl</b><br><code>{esc(prefix)}.{esc(key)}.position=\\v</code><br><span class="muted">\\v = Analogwert 0–100.</span></p>')
             print('</div></details>')
             print('</div>')
         print('</div>')
@@ -591,8 +722,31 @@ else:
     plugin_btn="Plugin deaktivieren" if plugin_enabled else "Plugin aktivieren"
     plugin_btn_class="secondary" if plugin_enabled else "primary"
     print(f'<div style="margin:10px 0 18px"><b>Plugin:</b> {plugin_state} <form method="post" style="display:inline;margin-left:10px"><input type="hidden" name="page" value="status"><button class="btn {plugin_btn_class}" name="action" value="toggle_plugin">{plugin_btn}</button></form></div>')
+    ev=cfg.get("eventstream",{}) if isinstance(cfg.get("eventstream",{}),dict) else {}
+    evst=load(DATA/"event_status.json",{}); evchars=load(DATA/"event_characteristics.json",[])
+    hap_paired=bool(evst.get("paired") or (CFG/"homekit_pairing.json").exists())
+    ev_enabled=bool(ev.get("enabled"))
+    ev_running=bool(evst.get("running")) and evst.get("state") in ("starting","subscribing","connected","reconnecting")
+    ev_connected=evst.get("state")=="connected"
+    if not ev_enabled: ev_label="Inaktiv"; ev_cls="off"
+    elif ev_connected: ev_label="Verbunden"; ev_cls="on"
+    elif ev_running: ev_label="Verbindungsaufbau"; ev_cls="warn"
+    else: ev_label="Aktiv – Listener nicht verbunden"; ev_cls="warn"
+    localmap=load(DATA/"hap_local_mapping.json",{}); hapmap=load(DATA/"hap_device_mapping.json",{})
+    local_keys={e.get("key") for e in localmap.values() if isinstance(e,dict) and e.get("key")} if isinstance(localmap,dict) else set()
+    mapped_positions={e.get("position_key") for e in hapmap.values() if isinstance(e,dict) and e.get("position_key")} if isinstance(hapmap,dict) else set()
+    position_keys=[k for k in state.get("values",{}) if str(k).startswith("module.") and str(k).endswith(".position")] if isinstance(state,dict) else []
+    if len(position_keys)==1 and any(str(c.get("name","")).lower().startswith("position.") for c in evchars if isinstance(c,dict)): mapped_positions.add(position_keys[0])
+    local_published=len(local_keys | mapped_positions)
+    print('<div class="subcard" style="margin-bottom:16px"><h3>Lokaler Eventstream</h3>')
+    print(f'<div class="statusbar"><span class="statuspill {ev_cls}">Eventstream: {ev_label}</span><span class="statuspill {"on" if hap_paired else "off"}">HAP: {"gekoppelt" if hap_paired else "nicht gekoppelt"}</span><span class="statuspill">Lokal erkannt: {esc(evst.get("characteristics",len(evchars) if isinstance(evchars,list) else 0))} Characteristics</span><span class="statuspill on">Lokal verwendet: {local_published} UDP-Werte</span></div>')
+    if evst.get("last_event_at"):
+        print(f'<div><b>Letztes Event:</b> {esc(fmt_ts(evst.get("last_event_at")))} · <code>{esc(evst.get("last_characteristic",""))}={esc(evst.get("last_value",""))}</code></div>')
+    if ev_enabled and evst.get("error"):
+        print(f'<div class="bad" style="margin-top:6px"><b>Eventstream-Fehler:</b> {esc(evst.get("error"))}</div>')
+    print('</div>')
     if state:
-        interval=max(1,int(cfg.get("poll_interval_minutes",5)))
+        interval=max(1,int(cfg.get("poll_interval_minutes",3)))
         last_started=float(run_state.get("started_at",run_state.get("timestamp",0)) or 0)
         next_run=scheduler_last_success+interval*60 if scheduler_last_success else None
         next_run_text=fmt_ts(next_run) if next_run else "noch nicht geplant"
@@ -617,6 +771,7 @@ else:
         print('<div class="card"><h2>Aktuelle Werte</h2><table class="responsive current-values-table"><thead><tr><th>Wert</th><th>Aktuell</th><th>VELUX Schlüssel</th></tr></thead><tbody>')
         for k in sorted(vals):
             m=meta.get(k,{})
-            print(f'<tr><td data-label="Wert"><b>{esc(m.get("label",k))}</b></td><td data-label="Aktuell">{esc(display_value(vals[k],m))} {esc(m.get("unit",""))}</td><td data-label="VELUX Schlüssel"><code>{esc(k)}</code></td></tr>')
+            shown=loxone_value(k, vals[k])
+            print(f'<tr><td data-label="Wert"><b>{esc(m.get("label",k))}</b></td><td data-label="Aktuell">{esc(display_value(shown,m))} {esc(m.get("unit",""))}</td><td data-label="VELUX Schlüssel"><code>{esc(k)}</code></td></tr>')
         print('</tbody></table></div>')
 print('</div>')

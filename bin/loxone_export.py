@@ -93,8 +93,9 @@ def build():
         f"# Virtueller UDP-Ausgang Adresse: {udp_address}",
         "# In Loxone Config 'Verbindung nach Senden schließen' aktivieren.",
         f"# Befehls-Präfix: {cmd_prefix}",
-        "# Digitale Befehle in 'Befehl bei EIN'; Befehl bei AUS leer lassen.",
-        "# POSITION ist analog und verwendet <v> als Ausgangswert.",
+        "# Alle Befehle verwenden \\v als Loxone-Ausgangswert.",
+        "# AUF/STOP/ZU: \\v=1; POSITION: \\v=0-100.",
+        f"# VELUX-Automatik: {cmd_prefix}.velux_active.automation=\\v (1 = Automatik freigeben)",
         ""
     ]
     for d in devices:
@@ -102,12 +103,19 @@ def build():
         name=d.get("name") or key
         cmd_lines += [
             f"[{name}]",
-            f"AUF={cmd_prefix}.{key}.open=1",
-            f"STOP={cmd_prefix}.{key}.stop=1",
-            f"ZU={cmd_prefix}.{key}.close=1",
-            f"POSITION={cmd_prefix}.{key}.position=<v>",
+            f"AUF={cmd_prefix}.{key}.open=\\v",
+            f"STOP={cmd_prefix}.{key}.stop=\\v",
+            f"ZU={cmd_prefix}.{key}.close=\\v",
+            f"POSITION={cmd_prefix}.{key}.position=\\v",
             ""
         ]
+
+    cmd_lines += [
+        "[VELUX Automatik]",
+        f"AUTOMATIK={cmd_prefix}.velux_active.automation=\\v",
+        "# Wert 1 gibt die VELUX-Automatik wieder frei.",
+        ""
+    ]
 
     # CSVs are easiest to copy/import/reference from Loxone Config
     import csv, io
@@ -126,13 +134,14 @@ def build():
         key=d.get("udp_key") or d.get("id")
         name=d.get("name") or key
         for label,msg in [
-            ("AUF",f"{cmd_prefix}.{key}.open=1"),
-            ("STOP",f"{cmd_prefix}.{key}.stop=1"),
-            ("ZU",f"{cmd_prefix}.{key}.close=1"),
-            ("POSITION",f"{cmd_prefix}.{key}.position=<v>"),
+            ("AUF",f"{cmd_prefix}.{key}.open=\\v"),
+            ("STOP",f"{cmd_prefix}.{key}.stop=\\v"),
+            ("ZU",f"{cmd_prefix}.{key}.close=\\v"),
+            ("POSITION",f"{cmd_prefix}.{key}.position=\\v"),
         ]:
-            hint="Befehl bei EIN; AUS leer" if label!="POSITION" else "Analogwert; <v> wird durch Wert ersetzt"
+            hint="Loxone-Wert \\v; 1 senden" if label!="POSITION" else "Loxone-Analogwert \\v; 0-100"
             w.writerow([name,label,msg,udp_address,hint])
+    w.writerow(["VELUX Automatik","AUTOMATIK",f"{cmd_prefix}.velux_active.automation=\\v",udp_address,"Loxone-Wert \\v; 1 = Automatik freigeben"])
     commands_csv=sio.getvalue()
 
     # XML-like snippet for copy/paste/reference, not pretending to be a native Loxone project file
@@ -149,11 +158,12 @@ def build():
         key=d.get("udp_key") or d.get("id")
         name=str(d.get("name") or key).replace("&","&amp;").replace('"',"&quot;")
         xml.append(f'    <Device name="{name}" key="{key}">')
-        xml.append(f'      <Command name="AUF">{cmd_prefix}.{key}.open=1</Command>')
-        xml.append(f'      <Command name="STOP">{cmd_prefix}.{key}.stop=1</Command>')
-        xml.append(f'      <Command name="ZU">{cmd_prefix}.{key}.close=1</Command>')
+        xml.append(f'      <Command name="AUF">{cmd_prefix}.{key}.open=\\v</Command>')
+        xml.append(f'      <Command name="STOP">{cmd_prefix}.{key}.stop=\\v</Command>')
+        xml.append(f'      <Command name="ZU">{cmd_prefix}.{key}.close=\\v</Command>')
         xml.append(f'      <Command name="POSITION">{cmd_prefix}.{key}.position=\\v</Command>')
         xml.append("    </Device>")
+    xml.append(f'    <Automation>{cmd_prefix}.velux_active.automation=\\v</Automation>')
     xml.append("  </Commands>")
     xml.append("</VeluxActiveLoxoneExport>")
 

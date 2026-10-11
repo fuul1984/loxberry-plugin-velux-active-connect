@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse, json, os, sys, time, traceback
 from pathlib import Path
+from logutil import log
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from control_listener import execute
@@ -25,14 +26,6 @@ def save(p,o):
     tmp=p.with_suffix(p.suffix+".tmp")
     tmp.write_text(json.dumps(o,indent=2,ensure_ascii=False),encoding="utf-8")
     tmp.replace(p)
-
-def log(msg):
-    try:
-        LOG.mkdir(parents=True,exist_ok=True)
-        with LOGFILE.open("a",encoding="utf-8") as f:
-            f.write(time.strftime("%Y-%m-%d %H:%M:%S ")+str(msg)+"\n")
-    except Exception:
-        pass
 
 def main():
     ap=argparse.ArgumentParser()

@@ -1,7 +1,7 @@
 {
   "email": "",
   "password": "",
-  "poll_interval_minutes": 5,
+  "poll_interval_minutes": 3,
   "udp_enabled": true,
   "udp_port": 7000,
   "udp_prefix": "velux",
@@ -26,8 +26,15 @@
     "enabled": false,
     "udp_listen_port": 7001,
     "command_prefix": "velux.cmd",
-    "allowed_senders": []
+    "allowed_senders": [],
+    "primary_path": "direct"
   },
   "udp_send_mode": "always",
-  "plugin_enabled": true
+  "plugin_enabled": true,
+  "heartbeat_error_threshold": 3,
+  "eventstream": {
+    "enabled": false,
+    "mode": "production",
+    "port": 5001
+  }
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json, time, urllib.parse, urllib.request, urllib.error
+import json, os, time, urllib.parse, urllib.request, urllib.error
+from pathlib import Path
 from typing import Any
 from version import plugin_version
 
@@ -135,19 +136,24 @@ def set_cover_position(token: str, home_id: str, module_id: str, bridge_id: str,
         raise VeluxError(f"setstate fehlgeschlagen: {data}")
     return data
 
-def stop_cover(token: str, home_id: str, module_id: str, bridge_id: str) -> dict[str, Any]:
-    """Stop a cover. pyatmo uses target_position=-1 for stop."""
-    module = {"id": module_id, "target_position": -1}
-    if bridge_id:
-        module["bridge"] = bridge_id
-    payload = {"home": {"id": home_id, "modules": [module]}}
-    data = post_json(SETSTATE_URL, payload, timeout=25, token=token)
-    body = data.get("body") if isinstance(data, dict) else None
-    errors = body.get("errors") if isinstance(body, dict) else None
+def stop_cover(token: str, home_id: str, module_id: str, bridge_id: str, timezone: str="Europe/Zurich") -> dict[str, Any]:
+    """Stop movements using the VELUX app sync API semantics.
+
+    The official app addresses the gateway for stop and sends
+    stop_movements=all; it does not emulate stop with target_position=-1.
+    """
+    if not bridge_id:
+        raise VeluxError("Gateway-/Bridge-ID fehlt für Stop")
+    payload={"app_version":APP_VERSION,
+             "home":{"id":home_id,"timezone":timezone,
+                     "modules":[{"id":bridge_id,"stop_movements":"all"}]}}
+    data=post_json(SYNC_SETSTATE_URL,payload,timeout=25,token=token)
+    body=data.get("body") if isinstance(data,dict) else None
+    errors=body.get("errors") if isinstance(body,dict) else None
     if errors:
-        raise VeluxError(f"setstate API-Fehler: {errors}")
-    if data.get("status") not in (None, "ok"):
-        raise VeluxError(f"setstate fehlgeschlagen: {data}")
+        raise VeluxError(f"stop setstate API-Fehler: {errors}")
+    if data.get("status") not in (None,"ok"):
+        raise VeluxError(f"stop setstate fehlgeschlagen: {data}")
     return data
 
 
@@ -160,14 +166,49 @@ def trigger_gateway_key_retrieval(token: str, home_id: str, gateway_id: str) -> 
 
 def signed_position(token: str, home_id: str, module_id: str, bridge_id: str, position: int,
                     sign_key_id: str, hash_sign_key: str, timezone: str="Europe/Zurich") -> dict[str, Any]:
-    from signing import build_signed_module
-    mod=build_signed_module(module_id,position,bridge_id,sign_key_id,hash_sign_key)
+    from signing import allocate_nonces, build_signed_module
+    # Keep nonce allocation shared between the UDP listener and Web/CLI process.
+    # Calls are already serialized by control_listener's API_LOCK. Persist the
+    # allocation before sending so even a rejected request never reuses a pair.
+    data_dir=Path(os.environ.get("LBPDATADIR") or "/opt/loxberry/data/plugins/veluxactive")
+    nonce_state_file=data_dir/"signing_nonce.json"
+    last_ts=0; last_nonce=-1
+    try:
+        ns=json.loads(nonce_state_file.read_text(encoding="utf-8"))
+        last_ts=int(ns.get("timestamp",0) or 0)
+        last_nonce=int(ns.get("nonce",-1))
+    except Exception:
+        pass
+    timestamp,nonce=allocate_nonces(int(time.time()),last_ts,last_nonce)
+    nonce_state_file.parent.mkdir(parents=True,exist_ok=True)
+    tmp=nonce_state_file.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"timestamp":timestamp,"nonce":nonce}),encoding="utf-8")
+    os.chmod(tmp,0o600)
+    tmp.replace(nonce_state_file)
+    mod=build_signed_module(module_id,position,bridge_id,sign_key_id,hash_sign_key,timestamp=timestamp,nonce=nonce)
+    # Safe diagnostics for KIG 300: expose request metadata needed to compare
+    # accepted/rejected signed calls, but never log or return secret key/hash material.
+    diag={
+        "timestamp": mod.get("timestamp"),
+        "nonce": mod.get("nonce"),
+        "module_id": module_id,
+        "bridge_id": bridge_id,
+        "sign_key_id": sign_key_id,
+        "target_position": int(position),
+        "rain_override": bool(mod.get("force")),
+        "timezone": timezone,
+        "home_id": home_id,
+        "app_version": APP_VERSION,
+    }
     payload={"app_type":"app_velux","app_version":APP_VERSION,
              "home":{"id":home_id,"timezone":timezone,"modules":[mod]}}
     data=post_json(SYNC_SETSTATE_URL,payload,timeout=25,token=token)
     body=data.get("body") if isinstance(data,dict) else None
     errors=body.get("errors") if isinstance(body,dict) else None
-    if errors: raise VeluxError(f"signiertes setstate API-Fehler: {errors}")
+    if errors:
+        raise VeluxError(f"signiertes setstate API-Fehler: {errors}; diag={diag}")
+    if isinstance(data,dict):
+        data["_loxberry_sign_diag"]=diag
     return data
 
 

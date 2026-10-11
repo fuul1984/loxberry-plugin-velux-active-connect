@@ -6,10 +6,23 @@ def compute_hash(key,position,timestamp,nonce,device_id):
     msg=f"target_position{position}{timestamp}{nonce}{device_id}".encode()
     d=hmac.new(decode_key(key),msg,hashlib.sha512).digest()
     return base64.b64encode(d).decode().replace("+","-").replace("/","_")
+
+def allocate_nonces(now_ts, last_ts, last_nonce):
+    """Allocate a unique (timestamp, nonce) pair like the current reference.
+
+    A newer wall-clock second starts again at nonce 0. If the clock has not
+    advanced, keep the last timestamp and increment the nonce so a pair is
+    never reused.
+    """
+    now_ts=int(now_ts); last_ts=int(last_ts or 0); last_nonce=int(last_nonce or 0)
+    if now_ts <= last_ts:
+        return last_ts, last_nonce + 1
+    return now_ts, 0
+
 def build_signed_module(module_id,position,bridge_id,sign_key_id,hash_sign_key,timestamp=None,nonce=0):
     timestamp=int(time.time()) if timestamp is None else int(timestamp)
     return {"id":module_id,"nonce":nonce,"bridge":bridge_id,"sign_key_id":sign_key_id,
-            "target_position":int(position),"force":True,
+            "target_position":int(position),
             "hash_target_position":compute_hash(hash_sign_key,int(position),timestamp,nonce,module_id),
             "timestamp":timestamp}
 

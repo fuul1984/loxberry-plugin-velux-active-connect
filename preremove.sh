@@ -1,6 +1,11 @@
 #!/bin/bash
 LBROOT="${5:-${LBHOMEDIR:-/opt/loxberry}}"
 DATA="$LBROOT/data/plugins/veluxactive"
+if [ -f "$DATA/event_listener.pid" ]; then
+  pid=$(cat "$DATA/event_listener.pid" 2>/dev/null)
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  rm -f "$DATA/event_listener.pid"
+fi
 if [ -f "$DATA/control_listener.pid" ]; then
   pid=$(cat "$DATA/control_listener.pid" 2>/dev/null)
   [ -n "$pid" ] && kill "$pid" 2>/dev/null || true

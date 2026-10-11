@@ -55,8 +55,13 @@ fi
 
 chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/velux_scheduler.py" 2>/dev/null || true
 
-# Dependency for signed VELUX gateway control
+# Dependencies for signed VELUX gateway control. The package file mode is not
+# assumed to survive ZIP extraction, so make the installer executable first.
+chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/install_dependencies.sh" 2>/dev/null || true
 "$LBROOT/bin/plugins/$PLUGIN_FOLDER/install_dependencies.sh" "$@" || true
+# Optional local HAP eventstream dependency
+python3 -c "import homekit" >/dev/null 2>&1 || (python3 -m pip install --break-system-packages "homekit[IP]" || python3 -m pip install "homekit[IP]" || true)
+chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_setup.py" "$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_listener.py" "$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_watchdog.sh" 2>/dev/null || true
 chmod +x "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_cli.py" 2>/dev/null || true
 
 # Frische Neuinstallation: Hauptlog leeren.
@@ -68,5 +73,6 @@ chmod 644 "$LOG/veluxactive.log" 2>/dev/null || true
 # UDP-Control-Listener nach Neuinstallation starten, falls aktiviert.
 rm -f "$DATA/control_listener.pid"
 "$LBROOT/bin/plugins/$PLUGIN_FOLDER/control_watchdog.sh" >/dev/null 2>&1 || true
+"$LBROOT/bin/plugins/$PLUGIN_FOLDER/event_watchdog.sh" >/dev/null 2>&1 || true
 
 exit 0
